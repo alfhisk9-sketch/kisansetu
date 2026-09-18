@@ -17,10 +17,12 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-flash-lite-latest
       - key: SESSION_SECRET
         generateValue: true
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: ALLOW_OFFLINE_DEV
+        value: "false"
