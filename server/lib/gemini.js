@@ -88,9 +88,10 @@ ${question}
 Provide a helpful, grounded response following the system instructions.`;
 
   const modelsToTry = [
-    process.env.GEMINI_MODEL || "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite"
+    process.env.GEMINI_MODEL || "gemini-flash-lite-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
 
   let lastError = null;
