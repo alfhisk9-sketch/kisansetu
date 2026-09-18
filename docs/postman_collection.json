@@ -1,0 +1,2343 @@
+{
+  "info": {
+    "name": "KisanSetu API — QA Contract Verification",
+    "description": "Covers every route in server/routes/*.js. Each endpoint has a HAPPY PATH request and one deliberate BAD INPUT request to check the error shape against PROJECT_CONTRACT.md section 4 ({ \"error\": \"message\" } with 400/404/401). Run against a freshly seeded DB (npm run seed). Folders are named after the owning route file per contract section 4 ('existing route files own their resource').",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000/api"
+    },
+    {
+      "key": "lotId",
+      "value": "REPLACE_WITH_REAL_LOT_ID",
+      "description": "Grab a real id from GET {{baseUrl}}/lots after seeding — lot ids are randomized per seed run (LOT-YYYY-NNNN), not fixed."
+    },
+    {
+      "key": "offerId",
+      "value": "REPLACE_WITH_REAL_OFFER_ID"
+    },
+    {
+      "key": "transactionId",
+      "value": "REPLACE_WITH_REAL_TXN_ID"
+    },
+    {
+      "key": "grievanceId",
+      "value": "REPLACE_WITH_REAL_GRIEVANCE_ID"
+    },
+    {
+      "key": "demandId",
+      "value": "REPLACE_WITH_REAL_DEMAND_ID"
+    }
+  ],
+  "item": [
+    {
+      "name": "auth.js",
+      "item": [
+        {
+          "name": "Login — happy (shaik.rabbani)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ],
+              "query": []
+            },
+            "description": "Contract: role in {farmer,fpo,buyer,admin}. Expect 200 with {user, profile}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"shaik.rabbani\",\n  \"password\": \"demo123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('returns user + profile', () => { const b = pm.response.json(); pm.expect(b.user).to.exist; pm.expect(b.profile).to.exist; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — BAD INPUT (wrong password)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ],
+              "query": []
+            },
+            "description": "Contract section 4: 401 for auth failures with { error }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"shaik.rabbani\",\n  \"password\": \"wrong-password\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 per contract auth error', () => pm.response.to.have.status(401));",
+                  "pm.test('error shape { error }', () => { const b = pm.response.json(); pm.expect(b.error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Demo accounts list — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/demo-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "demo-accounts"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "crops.js",
+      "item": [
+        {
+          "name": "List crops — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crops",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crops"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK, array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown sub-route — BAD INPUT (404 shape check)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crops/does-not-exist/nested",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crops",
+                "does-not-exist",
+                "nested"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: server/index.js has no catch-all 404 handler, so unmatched routes fall through to Express's default HTML 404 — violates contract section 4's { error } shape requirement for every status code."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('should be 404 JSON, NOT Express HTML default', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.response.to.be.json;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "markets.js",
+      "item": [
+        {
+          "name": "List markets — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/markets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "markets"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Price history — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/markets/prices?cropId=crop-onion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "markets",
+                "prices"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-onion"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Price history — BAD INPUT (missing cropId)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/markets/prices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "markets",
+                "prices"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Market compare — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/markets/compare?cropId=crop-onion&district=Nashik&quantity=20&grade=A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "markets",
+                "compare"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-onion"
+                },
+                {
+                  "key": "district",
+                  "value": "Nashik"
+                },
+                {
+                  "key": "quantity",
+                  "value": "20"
+                },
+                {
+                  "key": "grade",
+                  "value": "A"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, has options[]', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().options).to.be.an('array'); });",
+                  "pm.test('each option has scoreComponents (explainability, contract section 12)', () => {",
+                  "  const opts = pm.response.json().options;",
+                  "  if (opts.length) pm.expect(opts[0].scoreComponents).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Market compare — BAD INPUT (missing district)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/markets/compare?cropId=crop-onion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "markets",
+                "compare"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-onion"
+                }
+              ]
+            },
+            "description": "Contract-compliant: route already guards this with 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "forecast (MISSING — see BUG_LIST.md)",
+      "item": [
+        {
+          "name": "GET /api/forecast — happy (per contract spec)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forecast?cropId=crop-onion&marketId=mkt-lasalgaon&horizonDays=14",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forecast"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-onion"
+                },
+                {
+                  "key": "marketId",
+                  "value": "mkt-lasalgaon"
+                },
+                {
+                  "key": "horizonDays",
+                  "value": "14"
+                }
+              ]
+            },
+            "description": "M5's ML forecast feature. forecast_runs table exists in db.js, but there's no route file, no lib/forecast.js, and no frontend page/route. See BUG_LIST.md — severity: blocks demo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('BLOCKS DEMO: endpoint does not exist yet', () => {",
+                  "  // Contract section 4 requires this exact endpoint. As of this QA pass,",
+                  "  // there is no server/routes/forecast.js, no lib/forecast.js, no app.use() mount",
+                  "  // in server/index.js, and no client page/route consumes it. Expect 404 today.",
+                  "  pm.response.to.have.status(200); // will currently FAIL — see BUG_LIST.md",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/forecast — insufficient-data shape check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forecast?cropId=crop-wheat&marketId=mkt-nagpur&horizonDays=90",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forecast"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-wheat"
+                },
+                {
+                  "key": "marketId",
+                  "value": "mkt-nagpur"
+                },
+                {
+                  "key": "horizonDays",
+                  "value": "90"
+                }
+              ]
+            },
+            "description": "Once implemented: contract says insufficient-data case must be 200 with { error, trainedOnRows } — a normal labeled outcome, not an HTTP error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Contract requires 200 + insufficient-data note, not an error', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lots.js",
+      "item": [
+        {
+          "name": "List lots — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lots?ownerType=farmer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots"
+              ],
+              "query": [
+                {
+                  "key": "ownerType",
+                  "value": "farmer"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get lot by id — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}"
+              ],
+              "query": []
+            },
+            "description": "Replace {{lotId}} collection variable with a real id from the List Lots response after seeding."
+          },
+          "response": []
+        },
+        {
+          "name": "Get lot by id — BAD INPUT (unknown id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lots/LOT-9999-NOPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "LOT-9999-NOPE"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create lot — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerType\": \"farmer\",\n  \"ownerId\": \"farmer-1\",\n  \"cropId\": \"crop-onion\",\n  \"variety\": \"Nashik Red\",\n  \"quantityQuintals\": 25,\n  \"grade\": \"A\",\n  \"location\": \"Niphad\",\n  \"district\": \"Nashik\",\n  \"harvestDate\": \"2026-08-01\",\n  \"availableFrom\": \"2026-09-05\",\n  \"expectedPrice\": 2200,\n  \"minAcceptablePrice\": 1900\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('lotId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create lot — BAD INPUT (missing required ownerId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: ownerId is NOT NULL in schema but route never validates req.body before binding. better-sqlite3 throws a TypeError on an undefined bind param, which the global error handler turns into a 500 { error: 'Internal server error', detail } — not the 400 { error } shape contract section 4 requires for bad input. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerType\": \"farmer\",\n  \"cropId\": \"crop-onion\",\n  \"quantityQuintals\": 25,\n  \"location\": \"Niphad\",\n  \"district\": \"Nashik\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update lot status — happy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}",
+                "status"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Under negotiation\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update lot status — BAD INPUT (unknown lot id)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots/LOT-9999-NOPE/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "LOT-9999-NOPE",
+                "status"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: route never checks the lot exists before UPDATE+SELECT. For an unknown id this returns 200 with an empty body (SELECT finds nothing, res.json(undefined)) instead of 404 — the frontend's api.ts calls res.json() on that empty body and will throw a client-side JSON parse error. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Sold\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 404 with error message', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Grade a lot — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}/grade",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}",
+                "grade"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sizeRating\": \"Good\",\n  \"moistureRating\": \"Good\",\n  \"damagePct\": 2,\n  \"foreignMaterialPct\": 1,\n  \"appearanceRating\": \"Good\",\n  \"verifiedBy\": \"admin-1\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created, grade in A/B/C', () => { pm.response.to.have.status(201); pm.expect(['A','B','C']).to.include(pm.response.json().grade); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Grade a lot — BAD INPUT (missing damagePct)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}/grade",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}",
+                "grade"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: same missing-validation pattern — a missing field binds as undefined and better-sqlite3 throws, producing a 500 instead of 400. Also note: this route never confirms the lot id in the URL actually exists, so grading a nonexistent lot silently 'succeeds'. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sizeRating\": \"Good\",\n  \"moistureRating\": \"Good\",\n  \"foreignMaterialPct\": 1,\n  \"appearanceRating\": \"Good\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Storage decision — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}/storage-decision?storageId=store-1&storageDays=14",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}",
+                "storage-decision"
+              ],
+              "query": [
+                {
+                  "key": "storageId",
+                  "value": "store-1"
+                },
+                {
+                  "key": "storageDays",
+                  "value": "14"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Storage decision — BAD INPUT (missing storageId)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lots/{{lotId}}/storage-decision",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lots",
+                "{{lotId}}",
+                "storage-decision"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "buyers.js",
+      "item": [
+        {
+          "name": "List buyers — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get buyer by id — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/buyer-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "buyer-1"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get buyer by id — BAD INPUT (unknown id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/buyer-nope",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "buyer-nope"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List all buyer demands — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/demands/all?cropId=crop-onion&status=Open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "demands",
+                "all"
+              ],
+              "query": [
+                {
+                  "key": "cropId",
+                  "value": "crop-onion"
+                },
+                {
+                  "key": "status",
+                  "value": "Open"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Post buyer demand — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/demands",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "demands"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buyerId\": \"buyer-1\",\n  \"cropId\": \"crop-onion\",\n  \"quantityQuintals\": 50,\n  \"gradeRequired\": \"A\",\n  \"requiredBy\": \"2026-09-30\",\n  \"offerPrice\": 2100,\n  \"location\": \"Pune\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Post buyer demand — BAD INPUT (missing buyerId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/demands",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "demands"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: same missing-validation pattern as POST /lots — buyerId has no app-level check, missing value binds undefined, better-sqlite3 throws, global handler returns 500 instead of 400. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cropId\": \"crop-onion\",\n  \"quantityQuintals\": 50,\n  \"location\": \"Pune\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buyer matches for a lot — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/match/for-lot/{{lotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "match",
+                "for-lot",
+                "{{lotId}}"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Buyer matches for a lot — BAD INPUT (unknown lot)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/buyers/match/for-lot/LOT-9999-NOPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "buyers",
+                "match",
+                "for-lot",
+                "LOT-9999-NOPE"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fpo.js",
+      "item": [
+        {
+          "name": "Get FPO — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-1"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get FPO — BAD INPUT (unknown id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-nope",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-nope"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "FPO aggregation summary — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-1/aggregation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-1",
+                "aggregation"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "FPO aggregation summary — BAD INPUT (unknown id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-nope/aggregation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-nope",
+                "aggregation"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create aggregate lot — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-1/aggregate-lot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-1",
+                "aggregate-lot"
+              ],
+              "query": []
+            },
+            "description": "Replace sourceLotIds with real farmer-owned lot ids from GET /lots?ownerType=farmer before running.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceLotIds\": [\n    \"REPLACE_WITH_REAL_FARMER_LOT_ID_1\",\n    \"REPLACE_WITH_REAL_FARMER_LOT_ID_2\"\n  ],\n  \"cropId\": \"crop-onion\",\n  \"grade\": \"A\",\n  \"location\": \"Niphad\",\n  \"district\": \"Nashik\",\n  \"expectedPrice\": 2300,\n  \"minAcceptablePrice\": 2000,\n  \"harvestDate\": \"2026-08-01\",\n  \"availableFrom\": \"2026-09-05\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create aggregate lot — BAD INPUT (missing sourceLotIds)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/fpo/fpo-1/aggregate-lot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fpo",
+                "fpo-1",
+                "aggregate-lot"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cropId\": \"crop-onion\",\n  \"grade\": \"A\",\n  \"location\": \"Niphad\",\n  \"district\": \"Nashik\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "offers.js",
+      "item": [
+        {
+          "name": "List offers — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/offers?lotId={{lotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers"
+              ],
+              "query": [
+                {
+                  "key": "lotId",
+                  "value": "{{lotId}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Create offer — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers"
+              ],
+              "query": []
+            },
+            "description": "Requires an Open-for-offers lot. Replace {{lotId}} with one from GET /lots?status=Open for offers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lotId\": \"{{lotId}}\",\n  \"buyerId\": \"buyer-1\",\n  \"offerPrice\": 2150,\n  \"quantityQuintals\": 20,\n  \"deliveryDate\": \"2026-09-20\",\n  \"paymentTerms\": \"7 days post-delivery\",\n  \"expiryDate\": \"2026-09-15\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('offerId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create offer — BAD INPUT (missing lotId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: same missing-validation pattern. Missing lotId binds undefined into the INSERT, better-sqlite3 throws before the subsequent lots UPDATE even runs — 500 instead of 400. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buyerId\": \"buyer-1\",\n  \"offerPrice\": 2150,\n  \"quantityQuintals\": 20\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Respond to offer (accept) — happy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offers/{{offerId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers",
+                "{{offerId}}",
+                "respond"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"accept\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK, has transactionId', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().transactionId).to.exist; });",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('transactionId', pm.response.json().transactionId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Respond to offer — BAD INPUT (invalid action)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offers/{{offerId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers",
+                "{{offerId}}",
+                "respond"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 400 for an unrecognized action.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"yeet\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Respond to offer — BAD INPUT (counter with no counterPrice)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offers/{{offerId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offers",
+                "{{offerId}}",
+                "respond"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: action=counter with no counterPrice binds undefined into the INSERT — 500 instead of 400. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"counter\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "storage.js",
+      "item": [
+        {
+          "name": "List storage facilities — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/storage?district=Nashik",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage"
+              ],
+              "query": [
+                {
+                  "key": "district",
+                  "value": "Nashik"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List storage facilities — BAD INPUT (unknown cropName, robustness check)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/storage?cropName=Dragonfruit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage"
+              ],
+              "query": [
+                {
+                  "key": "cropName",
+                  "value": "Dragonfruit"
+                }
+              ]
+            },
+            "description": "Robustness note: crop_suitability is a nullable TEXT column in schema but the route calls .split(',') on every row unconditionally. Not reproducible with current seed data (all 4 seeded rows are populated), but any future facility with a NULL crop_suitability will 500 this whole endpoint for everyone. See BUG_LIST.md (low severity)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with empty/filtered array, no crash', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "transactions.js",
+      "item": [
+        {
+          "name": "List transactions — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions?buyerId=buyer-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "buyerId",
+                  "value": "buyer-1"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get transaction by id — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get transaction by id — BAD INPUT (unknown id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/TXN-9999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "TXN-9999"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create logistics request — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}/logistics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}",
+                "logistics"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehicleRequirement\": \"6-tonne truck\",\n  \"pickupDate\": \"2026-09-16\",\n  \"deliveryDate\": \"2026-09-18\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create logistics request — BAD INPUT (unknown transaction)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/TXN-9999/logistics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "TXN-9999",
+                "logistics"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehicleRequirement\": \"6-tonne truck\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update logistics status — happy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}/logistics/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}",
+                "logistics",
+                "status"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Assigned\",\n  \"vehicleNo\": \"MH15AB1234\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update logistics status — BAD INPUT (unknown transaction)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/TXN-9999/logistics/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "TXN-9999",
+                "logistics",
+                "status"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Assigned\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Advance payment stage — happy",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}/payments/advance-stage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}",
+                "payments",
+                "advance-stage"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Advance payment stage — BAD INPUT (unknown transaction)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/TXN-9999/payments/advance-stage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "TXN-9999",
+                "payments",
+                "advance-stage"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 with error message', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "grievances.js",
+      "item": [
+        {
+          "name": "List grievances — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/grievances?status=Submitted",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "grievances"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "Submitted"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Create grievance — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/grievances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "grievances"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"raisedBy\": \"farmer-1\",\n  \"issueCategory\": \"Payment delay\",\n  \"description\": \"Payment not received after 10 days.\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('grievanceId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create grievance — BAD INPUT (missing transactionId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/grievances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "grievances"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: same missing-validation pattern — missing transactionId binds undefined, better-sqlite3 throws, 500 instead of 400. Also note: even with a transactionId supplied, the route never checks it references a real transaction, so a grievance can be created against a nonexistent transaction. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"raisedBy\": \"farmer-1\",\n  \"issueCategory\": \"Payment delay\",\n  \"description\": \"Test\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 400 with error message', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update grievance status — happy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/grievances/{{grievanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "grievances",
+                "{{grievanceId}}"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Under Review\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update grievance status — BAD INPUT (unknown id)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/grievances/GRV-9999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "grievances",
+                "GRV-9999"
+              ],
+              "query": []
+            },
+            "description": "BUG CHECK: route never checks the grievance exists before UPDATE+SELECT. For an unknown id this returns 200 with an empty body instead of 404 — same class of bug as PATCH /lots/:id/status. See BUG_LIST.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Resolved\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EXPECTED per contract: 404 with error message', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "admin.js",
+      "item": [
+        {
+          "name": "Admin summary — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "summary"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Admin charts — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/charts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "charts"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "assistant.js",
+      "item": [
+        {
+          "name": "Ask assistant — happy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assistant/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assistant",
+                "ask"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Where should I sell my onions?\",\n  \"lotId\": \"{{lotId}}\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK, has answer + source', () => { const b = pm.response.json(); pm.response.to.have.status(200); pm.expect(b.answer).to.be.a('string'); pm.expect(['llm','rule-based-fallback']).to.include(b.source); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ask assistant — BAD INPUT (missing question)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assistant/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assistant",
+                "ask"
+              ],
+              "query": []
+            },
+            "description": "Contract-compliant: route already guards this with 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lotId\": \"{{lotId}}\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 with error message', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cross-cutting",
+      "item": [
+        {
+          "name": "Health check — happy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok:true', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().ok).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unmounted /api/forecast route family — 404 shape check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/totally-made-up-route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "totally-made-up-route"
+              ],
+              "query": []
+            },
+            "description": "Contract section 4 says every error uses { error: message }. server/index.js has no catch-all 404 route, only a 5-arg error handler for thrown exceptions — an unmatched path falls through to Express's built-in HTML 404, not JSON. See BUG_LIST.md."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SHOULD be JSON 404 with { error }, likely returns Express HTML default instead', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.response.to.be.json;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

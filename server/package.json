@@ -1,0 +1,19 @@
+{
+  "name": "krishisetu-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "seed": "node seed.js",
+    "seed:if-empty": "node seed-if-empty.js",
+    "dev": "node index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "nanoid": "^5.0.7"
+  }
+}

@@ -1,0 +1,30 @@
+// Approximate road distances (km) between district hubs, hand-entered from
+// public road-distance references for prototype purposes. Real deployments
+// would replace this with a routing API — see README "future scalability".
+export const DISTRICT_DISTANCES = {
+  _sameDistrictKm: 25,
+  "Guntur|Krishna": 35,
+  "Guntur|Kurnool": 200,
+  "Guntur|Anantapur": 280,
+  "Guntur|Nellore": 170,
+  "Guntur|Chittoor": 330,
+  "Guntur|Kadapa": 220,
+  "Guntur|Visakhapatnam": 370,
+  "Guntur|West Godavari": 95,
+  "Guntur|East Godavari": 170,
+  "Krishna|West Godavari": 60,
+  "Krishna|East Godavari": 140,
+  "Krishna|Visakhapatnam": 350,
+  "Krishna|Nellore": 200,
+  "Krishna|Kurnool": 215,
+  "Kurnool|Anantapur": 100,
+  "Kurnool|Kadapa": 145,
+  "Anantapur|Kadapa": 120,
+  "Anantapur|Chittoor": 250,
+  "Kadapa|Chittoor": 180,
+  "Kadapa|Nellore": 170,
+  "Chittoor|Nellore": 170,
+  "Nellore|Visakhapatnam": 430,
+  "West Godavari|East Godavari": 80,
+  "East Godavari|Visakhapatnam": 150,
+};
