@@ -39,8 +39,14 @@ import assistantRoutes from "./routes/assistant.js";
 import notificationsRoutes from "./routes/notifications.js";
 import forecastRoutes from "./routes/forecast.js";
 
-// Initialize database schema
-initSchema();
+// Initialize local SQLite database schema for development / offline mode
+if (process.env.NODE_ENV !== "production" || process.env.ALLOW_OFFLINE_DEV === "true") {
+  try {
+    initSchema();
+  } catch (err) {
+    console.warn("SQLite schema initialization skipped/warning:", err.message);
+  }
+}
 
 const app = express();
 

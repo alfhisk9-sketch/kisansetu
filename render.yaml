@@ -7,7 +7,7 @@ services:
     buildCommand: >
       cd client && npm install && npm run build &&
       cd ../server && npm install
-    startCommand: cd server && npm run seed:if-empty && npm start
+    startCommand: cd server && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
