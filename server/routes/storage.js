@@ -1,12 +1,29 @@
 import { Router } from "express";
 import { db } from "../db.js";
+import { getSupabaseAdmin } from "../lib/supabase.js";
 import { calcHaversineDistanceKm } from "../lib/algorithms.js";
 
 const router = Router();
 
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const { district, cropName, userLat, userLng } = req.query;
-  let rows = db.prepare(`SELECT * FROM storage_facilities`).all();
+  const supabase = getSupabaseAdmin();
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  let rows = null;
+  if (isProduction && supabase) {
+    try {
+      const { data, error } = await supabase.from("storage_facilities").select("*");
+      if (!error && data && data.length > 0) {
+        rows = data;
+      }
+    } catch (_) {}
+  }
+
+  if (!rows) {
+    rows = db.prepare(`SELECT * FROM storage_facilities`).all();
+  }
+
   if (district) rows = rows.filter((r) => r.district === district);
   if (cropName) rows = rows.filter((r) => (r.crop_suitability || "").split(",").map((s) => s.trim()).includes(cropName));
 
@@ -16,7 +33,7 @@ router.get("/", (req, res) => {
     rows = rows.map((r) => {
       let distanceKm = null;
       if (r.latitude && r.longitude) {
-        const straight = calcHaversineDistanceKm(nLat, nLng, r.latitude, r.longitude);
+        const straight = calcHaversineDistanceKm(nLat, nLng, Number(r.latitude), Number(r.longitude));
         distanceKm = straight != null ? Math.round(straight * 1.2) : null;
       }
       return { ...r, distanceKm, distanceLabel: distanceKm ? `${distanceKm} km (approx.)` : "Distance on request" };

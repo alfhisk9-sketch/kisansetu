@@ -12,16 +12,36 @@ import {
   scoreSellingOption,
 } from "../lib/algorithms.js";
 
+import { getSupabaseAdmin } from "../lib/supabase.js";
+
 const router = Router();
 
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
+  const supabase = getSupabaseAdmin();
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (isProduction && supabase) {
+    try {
+      const { data, error } = await supabase.from("markets").select("*").order("name");
+      if (!error && data && data.length > 0) return res.json(data);
+    } catch (_) {}
+  }
   res.json(db.prepare(`SELECT * FROM markets ORDER BY name`).all());
 });
 
 // Full price history for a crop at a market (used for trend charts)
-router.get("/prices", (req, res) => {
+router.get("/prices", async (req, res) => {
   const { cropId, marketId } = req.query;
   if (!cropId) return res.status(400).json({ error: "cropId is required" });
+  const supabase = getSupabaseAdmin();
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (isProduction && supabase) {
+    try {
+      let q = supabase.from("market_prices").select("*").eq("crop_id", cropId).order("date", { ascending: true });
+      if (marketId) q = q.eq("market_id", marketId);
+      const { data, error } = await q;
+      if (!error && data && data.length > 0) return res.json(data);
+    } catch (_) {}
+  }
   let rows;
   if (marketId) {
     rows = db
