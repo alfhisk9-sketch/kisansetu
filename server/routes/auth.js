@@ -185,4 +185,79 @@ router.post("/change-password", (req, res) => {
   res.json({ ok: true, message: "Password updated successfully" });
 });
 
+/**
+ * PHASE 21-23: Google OAuth Synchronization with Supabase Auth
+ */
+router.post("/sync-oauth", (req, res) => {
+  const { email, fullName, avatarUrl, supabaseUserId, role } = req.body;
+  if (!email || !supabaseUserId) {
+    return res.status(400).json({ error: "email and supabaseUserId are required" });
+  }
+
+  // 1. Check if user already exists by supabase_user_id or username/email
+  let user = db.prepare(`SELECT * FROM users WHERE supabase_user_id = ? OR LOWER(username) = LOWER(?)`).get(supabaseUserId, email);
+
+  if (user) {
+    // Update profile with newest OAuth metadata
+    db.prepare(`UPDATE users SET supabase_user_id = ?, avatar_url = COALESCE(?, avatar_url), auth_provider = 'google' WHERE id = ?`)
+      .run(supabaseUserId, avatarUrl || null, user.id);
+
+    let profile = null;
+    if (user.role === "farmer") profile = db.prepare(`SELECT * FROM farmers WHERE user_id = ?`).get(user.id);
+    if (user.role === "fpo") profile = db.prepare(`SELECT * FROM fpos WHERE user_id = ?`).get(user.id);
+    if (user.role === "buyer") profile = db.prepare(`SELECT * FROM buyers WHERE user_id = ?`).get(user.id);
+
+    const token = generateToken(user.id, user.role);
+    const { password: _pw, ...safeUser } = user;
+    return res.json({ user: safeUser, profile, token, isNewUser: false });
+  }
+
+  // 2. If user is new and no role provided yet -> return prompt for role selection
+  if (!role) {
+    return res.json({
+      needsRoleSelection: true,
+      email,
+      fullName: fullName || email.split("@")[0],
+      supabaseUserId,
+      avatarUrl: avatarUrl || null,
+      allowedRoles: ["farmer", "buyer", "fpo"]
+    });
+  }
+
+  // 3. User is new and role provided -> validate role (Strictly no admin self-selection)
+  if (!["farmer", "buyer", "fpo"].includes(role)) {
+    return res.status(400).json({ error: "Invalid role. Self-selection of Admin role is prohibited." });
+  }
+
+  const newUserId = `user-${nanoid(10)}`;
+  const displayName = fullName || email.split("@")[0];
+  const initialPasswordHash = hashPassword(nanoid(24)); // Random unguessable hash for OAuth user
+
+  db.prepare(`
+    INSERT INTO users (id, username, password, role, display_name, phone, location, auth_provider, supabase_user_id, avatar_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'google', ?, ?, datetime('now'))
+  `).run(newUserId, email, initialPasswordHash, role, displayName, "", "Andhra Pradesh", supabaseUserId, avatarUrl || null);
+
+  let profile = null;
+  if (role === "farmer") {
+    const farmerId = `farmer-${nanoid(8)}`;
+    db.prepare(`INSERT INTO farmers (id, user_id, name, district) VALUES (?, ?, ?, 'Guntur')`).run(farmerId, newUserId, displayName);
+    profile = db.prepare(`SELECT * FROM farmers WHERE id = ?`).get(farmerId);
+  } else if (role === "fpo") {
+    const fpoId = `fpo-${nanoid(8)}`;
+    db.prepare(`INSERT INTO fpos (id, user_id, name, district) VALUES (?, ?, ?, 'Guntur')`).run(fpoId, newUserId, displayName);
+    profile = db.prepare(`SELECT * FROM fpos WHERE id = ?`).get(fpoId);
+  } else if (role === "buyer") {
+    const buyerId = `buyer-${nanoid(8)}`;
+    db.prepare(`INSERT INTO buyers (id, user_id, name, buyer_type, location, verified) VALUES (?, ?, ?, 'Wholesaler', 'Andhra Pradesh', 1)`).run(buyerId, newUserId, displayName);
+    profile = db.prepare(`SELECT * FROM buyers WHERE id = ?`).get(buyerId);
+  }
+
+  const createdUser = db.prepare(`SELECT * FROM users WHERE id = ?`).get(newUserId);
+  const token = generateToken(createdUser.id, createdUser.role);
+  const { password: _pw, ...safeUser } = createdUser;
+
+  res.status(201).json({ user: safeUser, profile, token, isNewUser: true });
+});
+
 export default router;

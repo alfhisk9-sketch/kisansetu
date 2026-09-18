@@ -1,9 +1,18 @@
-/**
- * KisanSetu — Supabase Server Connector & Health Helper
- * 
- * Supports production PostgreSQL connectivity on Supabase.
- * Server holds SUPABASE_SERVICE_ROLE_KEY (never exposed to frontend).
- */
+import { createClient } from "@supabase/supabase-js";
+
+let _supabaseAdmin = null;
+
+export function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  if (!_supabaseAdmin) {
+    _supabaseAdmin = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+  }
+  return _supabaseAdmin;
+}
 
 export function getSupabaseConfig() {
   const url = process.env.SUPABASE_URL || null;

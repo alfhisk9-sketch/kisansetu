@@ -6,10 +6,13 @@
   "scripts": {
     "seed": "node seed.js",
     "seed:if-empty": "node seed-if-empty.js",
+    "market-data:sync": "node jobs/marketDataSync.js",
+    "market-data:seed": "node jobs/marketDataSync.js",
     "dev": "node index.js",
     "start": "node index.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",

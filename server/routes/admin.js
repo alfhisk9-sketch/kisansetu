@@ -2,6 +2,8 @@ import { Router } from "express";
 import { db } from "../db.js";
 import { calcMarketCharges, calcNetRealization, calcTransportCost, estimateDistanceKm } from "../lib/algorithms.js";
 import { DISTRICT_DISTANCES } from "../data/distances.js";
+import { requireRole } from "../lib/authMiddleware.js";
+import { syncMarketData, getLatestSyncStatus } from "../services/marketDataService.js";
 
 const router = Router();
 
@@ -62,6 +64,24 @@ router.get("/charts", (req, res) => {
   const disputesByStatus = db.prepare(`SELECT status, COUNT(*) as count FROM grievances GROUP BY status`).all();
 
   res.json({ priceTrend, lotsByStatus, demandByCrop, txnByStage, disputesByStatus });
+});
+
+router.post("/market-data/sync", requireRole(["admin"]), async (req, res) => {
+  try {
+    const result = await syncMarketData({ trigger: "admin_ui" });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: "Market data sync failed", detail: err.message });
+  }
+});
+
+router.get("/market-data/sync-status", (req, res) => {
+  try {
+    const status = getLatestSyncStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch sync status", detail: err.message });
+  }
 });
 
 export default router;

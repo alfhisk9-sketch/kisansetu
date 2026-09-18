@@ -20,28 +20,29 @@ This guide walks through configuring **Supabase** as the production PostgreSQL d
 4. Click **Run** (or press `Ctrl+Enter`).
 
 This script creates:
-- All 18 relational tables:
-  1. `users`
+- All relational tables:
+  1. `users` (with `auth_provider`, `supabase_user_id`, `avatar_url`)
   2. `farmers`
   3. `fpos`
   4. `buyers`
   5. `crops`
-  6. `markets`
-  7. `market_prices`
+  6. `markets` (with `latitude`, `longitude`, `address`, `pincode`, `location_source`)
+  7. `market_prices` (with `commodity`, `variety`, `source`, `source_url`, `data_status`, `observed_at`)
   8. `quality_grades`
   9. `lots`
   10. `buyer_demands`
   11. `offers`
   12. `transactions`
   13. `logistics`
-  14. `storage_facilities`
+  14. `storage_facilities` (with `latitude`, `longitude`, `type`, `temperature_controlled`, `source`)
   15. `payments`
   16. `grievances`
   17. `notifications`
   18. `forecast_runs`
-- Foreign key constraints, unique constraints, and check constraints.
+  19. `market_data_sync_logs` (with sync status, records fetched/inserted/updated/rejected)
+- Foreign key constraints, unique constraints on `(market_id, crop_id, date)`, and check constraints.
 - Performance indexes on `lots(crop_id)`, `lots(owner_id)`, `market_prices(crop_id, market_id, date)`, and `transactions`.
-- Row Level Security (RLS) policies ensuring public catalogs are readable by all while private transactions are restricted.
+- Row Level Security (RLS) policies ensuring public catalogs are readable by all while private transactions are restricted. Supports both Email and Google-authenticated Supabase users.
 
 ---
 

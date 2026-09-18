@@ -40,6 +40,12 @@ export interface MarketOption {
     timingScore: number;
   };
   reasons: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  source?: string;
+  sourceUrl?: string;
+  dataStatus?: "LIVE" | "UPDATED" | "ESTIMATED" | "FORECAST" | "SEEDED";
+  updatedAt?: string;
 }
 
 export interface Lot {

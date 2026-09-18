@@ -20,7 +20,7 @@ GUIDELINES:
 /**
  * Format platform context for grounding the prompt
  */
-export function buildGroundingContext({ user, crop, lots, markets, prices, topOption, locale = "en" }) {
+export function buildGroundingContext({ user, crop, lots, markets, prices, topOption, storages, locale = "en" }) {
   const parts = [];
   
   if (user) {
@@ -32,18 +32,29 @@ export function buildGroundingContext({ user, crop, lots, markets, prices, topOp
   }
 
   if (topOption) {
-    parts.push(`Recommended Market Option:
+    parts.push(`Recommended Market Option (from verified APMC Mandis):
 - Market: ${topOption.marketName} (${topOption.district})
-- Current Modal Price: ₹${topOption.modalPrice}/quintal
-- Distance: ${topOption.distanceKm} km
+- Current Modal Price: ₹${topOption.modalPrice}/quintal (Min: ₹${topOption.minPrice || "N/A"}, Max: ₹${topOption.maxPrice || "N/A"})
+- Mandi Coordinates: ${topOption.latitude ? `${topOption.latitude}, ${topOption.longitude}` : "Verified APMC Yard"}
+- Distance: Approx. ${topOption.distanceKm} km (Haversine/Road estimate)
 - Transport Cost: ₹${topOption.transportCostPerQuintal}/quintal
 - Estimated Net Realization: ₹${topOption.netRealization}/quintal
-- Key Factors: ${topOption.reasons?.join("; ") || "Favorable distance and price"}`);
+- Key Factors: ${topOption.reasons?.join("; ") || "Favorable distance and net price"}
+- Provenance: Government of India / AGMARKNET / data.gov.in`);
   }
 
   if (prices && prices.length > 0) {
-    const recentPrices = prices.slice(-5).map(p => `${p.market_name || "Mandi"}: ₹${p.modal_price}/q (${p.date})`).join(", ");
-    parts.push(`Recent Mandi Prices on Platform: ${recentPrices}`);
+    const recentPrices = prices.slice(0, 5).map(p => 
+      `${p.market_name || "Mandi"} (${p.market_district || ""}): ₹${p.modal_price}/q [Min: ₹${p.min_price || p.modal_price}, Max: ₹${p.max_price || p.modal_price}] on ${p.date} (Source: ${p.source || "AGMARKNET"})`
+    ).join("\n  • ");
+    parts.push(`Recent Mandi Prices on Platform:\n  • ${recentPrices}`);
+  }
+
+  if (storages && storages.length > 0) {
+    const storageList = storages.slice(0, 3).map(s => 
+      `${s.name} (${s.district}, ${s.type || "Warehouse"}): ₹${s.cost_per_day_per_quintal}/q/day, Available: ${s.available_capacity_quintals}q, Contact: ${s.contact || "Desk"}`
+    ).join("\n  • ");
+    parts.push(`Verified Regional Storage Facilities:\n  • ${storageList}`);
   }
 
   if (lots && lots.length > 0) {

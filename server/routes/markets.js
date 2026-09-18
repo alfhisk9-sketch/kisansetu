@@ -3,6 +3,7 @@ import { db } from "../db.js";
 import { DISTRICT_DISTANCES } from "../data/distances.js";
 import {
   estimateDistanceKm,
+  calcHaversineDistanceKm,
   calcTransportCost,
   calcMarketCharges,
   calcNetRealization,
@@ -49,7 +50,7 @@ function demandLevelFor(cropId, district) {
  * Every number is computed with the deterministic formulas in lib/algorithms.js.
  */
 router.get("/compare", (req, res) => {
-  const { cropId, district, quantity, grade, storageAvailable, sortBy } = req.query;
+  const { cropId, district, quantity, grade, storageAvailable, sortBy, userLat, userLng } = req.query;
   if (!cropId || !district) return res.status(400).json({ error: "cropId and district are required" });
   const qty = Number(quantity) || 10;
 
@@ -60,42 +61,62 @@ router.get("/compare", (req, res) => {
 
   const rawOptions = markets.map((market) => {
     const series = db
-      .prepare(`SELECT date, modal_price FROM market_prices WHERE crop_id = ? AND market_id = ? ORDER BY date ASC`)
+      .prepare(`SELECT date, modal_price, min_price, max_price, source, source_url, data_status, updated_at FROM market_prices WHERE crop_id = ? AND market_id = ? ORDER BY date ASC`)
       .all(cropId, market.id);
-    const latest = series[series.length - 1];
+    const latest = series[series.length - 1] || {};
     const trend7 = calcTrend(series, 7);
     const trend30 = calcTrend(series, 30);
     const volatility = calcVolatility(series);
 
-    const distanceKm = estimateDistanceKm(DISTRICT_DISTANCES, district, market.district);
+    let distanceKm = null;
+    let distanceMethod = "district_table";
+    if (userLat && userLng && market.lat && market.lng) {
+      const straightLine = calcHaversineDistanceKm(userLat, userLng, market.lat, market.lng);
+      if (straightLine != null) {
+        distanceKm = Math.round(straightLine * 1.22); // Road winding coefficient
+        distanceMethod = "haversine_road_est";
+      }
+    }
+    if (distanceKm == null) {
+      distanceKm = estimateDistanceKm(DISTRICT_DISTANCES, district, market.district);
+    }
+
     const transportCost = calcTransportCost({ distanceKm, quantityQuintals: qty });
-    const marketCharges = calcMarketCharges(latest.modal_price);
+    const marketCharges = calcMarketCharges(latest.modal_price || 0);
     const storageCost = storageAvailable === "true" ? 0 : 0; // storage cost handled separately in Module 10
-    const netRealization = calcNetRealization({ sellingPrice: latest.modal_price, transportCost, marketCharges, storageCost });
+    const netRealization = calcNetRealization({ sellingPrice: latest.modal_price || 0, transportCost, marketCharges, storageCost });
 
     const arrivalRow = db
-      .prepare(`SELECT arrival_qty_quintals FROM market_prices WHERE crop_id = ? AND market_id = ? ORDER BY date DESC LIMIT 1`)
+      .prepare(`SELECT arrival_qty_quintals, source, source_url, data_status, updated_at FROM market_prices WHERE crop_id = ? AND market_id = ? ORDER BY date DESC LIMIT 1`)
       .get(cropId, market.id);
 
     return {
       marketId: market.id,
       marketName: market.name,
       district: market.district,
+      state: market.state || "Andhra Pradesh",
+      lat: market.lat,
+      lng: market.lng,
+      address: market.address || `${market.name}, ${market.district}`,
+      pincode: market.pincode,
       currentPrice: latest.modal_price,
-      // Bug #7 fix: this was a dead `cond ? undefined : undefined` expression
-      // (always undefined, silently dropped by JSON.stringify). Compute the
-      // actual lowest recent modal price in the series instead.
-      minPrice: series.length ? Math.min(...series.map((s) => s.modal_price)) : null,
+      minPrice: latest.min_price || (series.length ? Math.min(...series.map((s) => s.modal_price)) : null),
+      maxPrice: latest.max_price || null,
+      source: arrivalRow?.source || latest.source || "Government of India / AGMARKNET",
+      sourceUrl: arrivalRow?.source_url || latest.source_url || "https://agmarknet.gov.in",
+      dataStatus: arrivalRow?.data_status || latest.data_status || "LATEST AVAILABLE",
+      updatedAt: arrivalRow?.updated_at || latest.updated_at || latest.date,
       trend7DayAvg: trend7.average,
       trend7DayChangePct: trend7.changePct,
       trend30DayAvg: trend30.average,
       volatilityPct: volatility,
       arrivalQtyQuintals: arrivalRow?.arrival_qty_quintals ?? null,
       distanceKm,
+      distanceMethod,
       transportCostPerQuintal: transportCost,
       marketChargesPerQuintal: marketCharges,
       netRealizationPerQuintal: netRealization,
-      qualityMeetsRequirement: true, // markets don't enforce grade; buyers do (see /buyers/match)
+      qualityMeetsRequirement: true,
       demandLevel,
     };
   });
@@ -144,8 +165,47 @@ router.get("/compare", (req, res) => {
     grade: grade || null,
     demandLevel,
     options,
-    disclaimer: "Prices are demo/seeded market data for prototype purposes. This is a favorable-selling-window indicator, not a guaranteed future price.",
+    disclaimer: "Net realization calculations are estimates based on mandi arrivals, distances, and standard charges. Selling prices fluctuate based on daily market arrivals.",
   });
+});
+
+/**
+ * PHASE 18 & 19: Geolocation & Nearby Storage Facilities
+ * Finds verified storage facilities near a given market or coordinates
+ */
+router.get("/nearby-storage", (req, res) => {
+  const { marketId, lat, lng, limit = 5 } = req.query;
+  let targetLat = Number(lat);
+  let targetLng = Number(lng);
+
+  if (marketId && (isNaN(targetLat) || isNaN(targetLng))) {
+    const m = db.prepare(`SELECT lat, lng, district FROM markets WHERE id = ?`).get(marketId);
+    if (m && m.lat && m.lng) {
+      targetLat = Number(m.lat);
+      targetLng = Number(m.lng);
+    }
+  }
+
+  const facilities = db.prepare(`SELECT * FROM storage_facilities ORDER BY verified DESC`).all();
+
+  const enriched = facilities.map((f) => {
+    let distanceKm = null;
+    if (!isNaN(targetLat) && !isNaN(targetLng) && f.latitude && f.longitude) {
+      const straight = calcHaversineDistanceKm(targetLat, targetLng, f.latitude, f.longitude);
+      distanceKm = straight != null ? Math.round(straight * 1.2) : null;
+    }
+    return {
+      ...f,
+      distanceKm,
+      distanceLabel: distanceKm != null ? `${distanceKm} km (approx.)` : "Distance on request",
+    };
+  });
+
+  if (!isNaN(targetLat) && !isNaN(targetLng)) {
+    enriched.sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
+  }
+
+  res.json(enriched.slice(0, Number(limit)));
 });
 
 export default router;

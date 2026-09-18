@@ -229,5 +229,61 @@ export function initSchema() {
     trained_on_rows INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS market_data_sync_logs (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    records_fetched INTEGER DEFAULT 0,
+    records_inserted INTEGER DEFAULT 0,
+    records_updated INTEGER DEFAULT 0,
+    records_rejected INTEGER DEFAULT 0,
+    details TEXT,
+    synced_at TEXT DEFAULT (datetime('now'))
+  );
   `);
+
+  // Safe idempotent column addition helper
+  const addColumn = (table, col, def) => {
+    try {
+      db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`).run();
+    } catch (_) {}
+  };
+
+  // Markets geolocation
+  addColumn("markets", "state", "TEXT DEFAULT 'Andhra Pradesh'");
+  addColumn("markets", "address", "TEXT");
+  addColumn("markets", "pincode", "TEXT");
+  addColumn("markets", "location_source", "TEXT DEFAULT 'verified_apmc'");
+  addColumn("markets", "status", "TEXT DEFAULT 'active'");
+
+  // Storage facilities geolocation & metadata
+  addColumn("storage_facilities", "type", "TEXT DEFAULT 'Cold Storage'");
+  addColumn("storage_facilities", "state", "TEXT DEFAULT 'Andhra Pradesh'");
+  addColumn("storage_facilities", "address", "TEXT");
+  addColumn("storage_facilities", "pincode", "TEXT");
+  addColumn("storage_facilities", "latitude", "REAL");
+  addColumn("storage_facilities", "longitude", "REAL");
+  addColumn("storage_facilities", "temperature_controlled", "INTEGER DEFAULT 1");
+  addColumn("storage_facilities", "source", "TEXT DEFAULT 'SEEDED / DEMO'");
+  addColumn("storage_facilities", "updated_at", "TEXT");
+
+  // Market prices provenance
+  addColumn("market_prices", "commodity", "TEXT");
+  addColumn("market_prices", "variety", "TEXT DEFAULT 'FAQ'");
+  addColumn("market_prices", "state", "TEXT DEFAULT 'Andhra Pradesh'");
+  addColumn("market_prices", "district", "TEXT");
+  addColumn("market_prices", "market", "TEXT");
+  addColumn("market_prices", "unit", "TEXT DEFAULT 'quintal'");
+  addColumn("market_prices", "source", "TEXT DEFAULT 'Government of India / AGMARKNET'");
+  addColumn("market_prices", "source_url", "TEXT DEFAULT 'https://agmarknet.gov.in'");
+  addColumn("market_prices", "source_record_id", "TEXT");
+  addColumn("market_prices", "data_status", "TEXT DEFAULT 'LATEST AVAILABLE'");
+  addColumn("market_prices", "observed_at", "TEXT");
+  addColumn("market_prices", "updated_at", "TEXT");
+
+  // Users OAuth fields
+  addColumn("users", "auth_provider", "TEXT DEFAULT 'local'");
+  addColumn("users", "supabase_user_id", "TEXT");
+  addColumn("users", "avatar_url", "TEXT");
 }

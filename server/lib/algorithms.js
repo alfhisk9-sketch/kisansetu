@@ -19,6 +19,31 @@ export function estimateDistanceKm(distanceTable, fromDistrict, toDistrict) {
 }
 
 /**
+ * Haversine formula for straight-line geographic distance between two lat/lng coordinates (km).
+ * Used for accurate distance estimation between farmer location, mandis, and storage facilities.
+ */
+export function calcHaversineDistanceKm(lat1, lon1, lat2, lon2) {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (isNaN(nLat1) || isNaN(nLon1) || isNaN(nLat2) || isNaN(nLon2)) return null;
+
+  const R = 6371; // Earth radius in km
+  const dLat = ((nLat2 - nLat1) * Math.PI) / 180;
+  const dLon = ((nLon2 - nLon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((nLat1 * Math.PI) / 180) *
+      Math.cos((nLat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
+/**
  * Transport cost formula (rule-based, not an external API):
  * base loading/unloading charge + per-km-per-quintal rate,
  * with a minimum-load efficiency factor for small quantities.

@@ -107,6 +107,8 @@ const askHandler = async (req, res) => {
                 district: mkt.district,
                 modalPrice: latestPrice.modal_price,
                 distanceKm: dist,
+                latitude: mkt.latitude,
+                longitude: mkt.longitude,
                 transportCostPerQuintal: transport,
                 netRealization: net,
                 recommendationScore: 88,
@@ -121,7 +123,13 @@ const askHandler = async (req, res) => {
       }
     }
 
-    // 4. Gather active lots for the user if available
+    // 4. Gather regional storage facilities
+    try {
+      const storages = db.prepare(`SELECT * FROM storage_facilities LIMIT 4`).all();
+      context.storages = storages;
+    } catch (e) {}
+
+    // 5. Gather active lots for the user if available
     if (userId) {
       const userLots = db.prepare(`
         SELECT l.*, c.name as crop_name
@@ -161,6 +169,7 @@ const askHandler = async (req, res) => {
     lots: context.lots,
     prices: context.prices,
     topOption: context.topOption,
+    storages: context.storages,
     locale
   });
 

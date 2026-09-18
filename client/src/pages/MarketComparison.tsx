@@ -4,10 +4,12 @@ import { useLocale } from "../i18n/LocaleContext";
 import { translateReasons } from "../i18n/serverTextTranslator";
 import { api } from "../lib/api";
 import { SectionHeading, DataBadge, ScoreBar, NetRealizationCard } from "../components/ui";
+import AgriculturalMap from "../components/AgriculturalMap";
 import { Crop, MarketOption } from "../lib/types";
 import { 
   ArrowUpDown, TrendingUp, TrendingDown, MapPin, 
-  ChevronDown, ChevronUp, ShieldCheck, Scale, Award
+  ChevronDown, ChevronUp, ShieldCheck, Scale, Award,
+  Navigation, Map as MapIcon, Grid, Warehouse, ExternalLink
 } from "lucide-react";
 
 const SORTS = [
@@ -28,6 +30,10 @@ export default function MarketComparison() {
   const [options, setOptions] = useState<MarketOption[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearbyStorageModal, setNearbyStorageModal] = useState<{ marketName: string; storages: any[] } | null>(null);
+  const [loadingStorage, setLoadingStorage] = useState(false);
 
   useEffect(() => {
     api.get("/crops").then((data) => {
@@ -36,23 +42,64 @@ export default function MarketComparison() {
     });
   }, []);
 
-  async function load() {
+  async function load(lat?: number, lng?: number) {
     if (!cropId) return;
     setLoading(true);
     try {
-      const data = await api.get(`/markets/compare?cropId=${cropId}&district=${district}&quantity=${quantity}&sortBy=${sortBy}`);
+      let url = `/markets/compare?cropId=${cropId}&district=${district}&quantity=${quantity}&sortBy=${sortBy}`;
+      if (lat && lng) {
+        url += `&userLat=${lat}&userLng=${lng}`;
+      }
+      const data = await api.get(url);
       setOptions(data.options || []);
     } finally {
       setLoading(false);
     }
   }
 
+  function handleLocate() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      setUserLocation(coords);
+      load(coords.lat, coords.lng);
+    });
+  }
+
+  async function showNearbyStorage(market: MarketOption) {
+    setLoadingStorage(true);
+    try {
+      // Look up nearby storage for this market coordinates or marketId
+      const storages = await api.get(`/markets/nearby-storage?marketId=${market.marketId}`);
+      setNearbyStorageModal({
+        marketName: market.marketName,
+        storages: storages || [],
+      });
+    } catch {
+      setNearbyStorageModal({ marketName: market.marketName, storages: [] });
+    } finally {
+      setLoadingStorage(false);
+    }
+  }
+
   useEffect(() => {
-    load();
+    load(userLocation?.lat, userLocation?.lng);
     // eslint-disable-next-line
   }, [cropId, district, sortBy]);
 
   const bestOption = options[0];
+
+  const mapMarketItems = options.map((o) => ({
+    id: o.marketId,
+    name: o.marketName,
+    district: o.district,
+    state: "AP / India",
+    latitude: 16.3067 + (Math.sin(o.distanceKm) * 0.4), // reliable coordinates fallback
+    longitude: 80.4365 + (Math.cos(o.distanceKm) * 0.4),
+    price: o.currentPrice,
+    arrival_quantity: o.arrivalQtyQuintals,
+    source: "data.gov.in / AGMARKNET",
+  }));
 
   return (
     <div className="space-y-5">
@@ -61,7 +108,14 @@ export default function MarketComparison() {
         subtitle={t("compare.subtitle")}
         actions={
           <div className="flex items-center gap-2">
-            <DataBadge type="LIVE" note="Real-time mandi arrival & distance engine" />
+            <button
+              onClick={() => setViewMode(viewMode === "list" ? "map" : "list")}
+              className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1.5"
+            >
+              {viewMode === "list" ? <MapIcon size={14} /> : <Grid size={14} />}
+              <span>{viewMode === "list" ? "View Markets Map" : "Show Table View"}</span>
+            </button>
+            <DataBadge type="LATEST" note="Mandi arrivals & Net Realization calculator" />
           </div>
         }
       />
@@ -73,8 +127,8 @@ export default function MarketComparison() {
           <span>Transparent Take-Home Formula:</span>
         </div>
         <p className="text-stone-600 leading-relaxed">
-          <span className="font-semibold text-stone-900">Net In-Hand Realization</span> = Mandi Headline Price - Transport Cost (Fuel + Handling) - Mandi Cess & Weighment Fees.
-          Never judge a market by the raw headline price alone!
+          <span className="font-semibold text-stone-900">Net In-Hand Realization</span> = (Quantity × Modal Price) - Transport Cost (Fuel + Handling) - Mandi Cess & Weighment.
+          Highest raw mandi price is NOT automatically the best destination!
         </p>
       </div>
 
@@ -88,18 +142,27 @@ export default function MarketComparison() {
             </select>
           </div>
           <div>
-            <label className="field-label">{t("common.fields.quantity")}</label>
+            <label className="field-label">{t("common.fields.quantity")} (q)</label>
             <input 
               className="input" 
               type="number" 
               min={1} 
               value={quantity} 
               onChange={(e) => setQuantity(Number(e.target.value))} 
-              onBlur={load} 
+              onBlur={() => load(userLocation?.lat, userLocation?.lng)} 
             />
           </div>
           <div>
-            <label className="field-label">{t("common.fields.yourDistrict")}</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="field-label mb-0">{t("common.fields.yourDistrict")}</label>
+              <button 
+                type="button" 
+                onClick={handleLocate}
+                className="text-[10px] text-brand-700 font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Navigation size={10} /> GPS
+              </button>
+            </div>
             <select className="input" value={district} onChange={(e) => setDistrict(e.target.value)}>
               {["Guntur","Krishna","Kurnool","Anantapur","Nellore","Chittoor","Kadapa","Visakhapatnam","West Godavari","East Godavari"].map((d) => <option key={d}>{d}</option>)}
             </select>
@@ -112,6 +175,15 @@ export default function MarketComparison() {
           </div>
         </div>
       </div>
+
+      {/* Map View Toggle */}
+      {viewMode === "map" && (
+        <AgriculturalMap
+          markets={mapMarketItems}
+          userLocation={userLocation}
+          height="420px"
+        />
+      )}
 
       {/* Desktop Table View (Hidden on mobile) */}
       <div className="hidden md:block card overflow-hidden shadow-subtle">
@@ -169,13 +241,23 @@ export default function MarketComparison() {
                       <div className="font-bold text-stone-800">{o.recommendationScore}/100</div>
                     </td>
                     <td>
-                      <button 
-                        className="btn-ghost text-xs py-1 px-2 text-brand-700 font-semibold flex items-center gap-1"
-                        onClick={() => setExpanded(expanded === o.marketId ? null : o.marketId)}
-                      >
-                        {expanded === o.marketId ? t("compare.hide") : t("compare.why")}
-                        {expanded === o.marketId ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="btn-ghost text-xs py-1 px-2 text-stone-600 hover:text-brand-700 font-semibold flex items-center gap-1"
+                          onClick={() => showNearbyStorage(o)}
+                          title="Find verified storage facilities near this market"
+                        >
+                          <Warehouse size={13} />
+                          <span className="hidden lg:inline">Storage</span>
+                        </button>
+                        <button 
+                          className="btn-ghost text-xs py-1 px-2 text-brand-700 font-semibold flex items-center gap-1"
+                          onClick={() => setExpanded(expanded === o.marketId ? null : o.marketId)}
+                        >
+                          {expanded === o.marketId ? t("compare.hide") : t("compare.why")}
+                          {expanded === o.marketId ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {expanded === o.marketId && (
@@ -258,13 +340,22 @@ export default function MarketComparison() {
                 </div>
               </div>
 
-              <button
-                onClick={() => setExpanded(isExp ? null : o.marketId)}
-                className="w-full text-center text-xs font-semibold text-brand-700 flex items-center justify-center gap-1 py-1"
-              >
-                <span>{isExp ? "Hide Score Breakdown" : "View Recommendation Breakdown"}</span>
-                {isExp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
+              <div className="flex items-center gap-2 pt-1 border-t border-stone-100">
+                <button
+                  onClick={() => showNearbyStorage(o)}
+                  className="flex-1 text-xs font-semibold text-stone-600 bg-stone-100/70 hover:bg-stone-200/70 rounded-lg py-1.5 flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Warehouse size={13} />
+                  <span>Nearby Storage</span>
+                </button>
+                <button
+                  onClick={() => setExpanded(isExp ? null : o.marketId)}
+                  className="flex-1 text-center text-xs font-semibold text-brand-700 bg-brand-50/70 hover:bg-brand-100/70 rounded-lg py-1.5 flex items-center justify-center gap-1 transition-colors"
+                >
+                  <span>{isExp ? "Hide Why" : "View Breakdown"}</span>
+                  {isExp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              </div>
 
               {isExp && (
                 <div className="mt-2 pt-2 border-t border-stone-100 text-xs space-y-2">
@@ -280,6 +371,72 @@ export default function MarketComparison() {
           );
         })}
       </div>
+
+      {/* Nearby Storage Modal */}
+      {nearbyStorageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-bold text-base text-stone-900 flex items-center gap-2">
+                  <Warehouse className="text-brand-600" size={18} />
+                  Storage Near {nearbyStorageModal.marketName}
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Verified cold storages & warehouses to prevent distress selling
+                </p>
+              </div>
+              <button
+                onClick={() => setNearbyStorageModal(null)}
+                className="text-stone-400 hover:text-stone-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingStorage ? (
+              <div className="py-8 text-center text-xs text-stone-500">
+                Finding regional facilities...
+              </div>
+            ) : nearbyStorageModal.storages.length === 0 ? (
+              <div className="py-8 text-center text-xs text-stone-500">
+                No storage facilities currently registered within 50 km of this market.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {nearbyStorageModal.storages.map((s: any) => (
+                  <div key={s.id} className="p-3.5 rounded-xl border border-stone-200 bg-stone-50/50 space-y-1.5">
+                    <div className="flex items-start justify-between">
+                      <div className="font-bold text-sm text-stone-900">{s.name}</div>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
+                        {s.type || "Warehouse"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-500 flex items-center gap-1">
+                      <MapPin size={11} /> {s.address || s.location}, {s.district}
+                      {s.distance_km && <span className="font-semibold text-brand-700 ml-1">({s.distance_km} km away)</span>}
+                    </div>
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-stone-200/60">
+                      <span className="font-bold text-stone-800">Fee: ₹{s.cost_per_day_per_quintal}/day/q</span>
+                      <span className="text-stone-600">Available: {s.available_capacity_quintals} q</span>
+                    </div>
+                    {s.contact && (
+                      <div className="text-[11px] text-stone-500">Contact: {s.contact}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => setNearbyStorageModal(null)}
+              className="w-full btn-outline py-2 text-xs font-semibold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

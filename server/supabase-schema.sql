@@ -79,21 +79,38 @@ CREATE TABLE IF NOT EXISTS public.markets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     district TEXT NOT NULL,
+    state TEXT DEFAULT 'Andhra Pradesh',
     lat NUMERIC(9, 6),
     lng NUMERIC(9, 6),
+    address TEXT,
+    pincode TEXT,
+    location_source TEXT DEFAULT 'verified_apmc',
+    status TEXT DEFAULT 'active',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. MARKET PRICES (Historical & Daily Arrivals)
+-- 7. MARKET PRICES (Historical & Daily Arrivals from AGMARKNET / OGD)
 CREATE TABLE IF NOT EXISTS public.market_prices (
     id TEXT PRIMARY KEY DEFAULT ('mp-' || substr(md5(random()::text), 1, 12)),
     market_id TEXT REFERENCES public.markets(id) ON DELETE CASCADE,
     crop_id TEXT REFERENCES public.crops(id) ON DELETE CASCADE,
+    commodity TEXT,
+    variety TEXT DEFAULT 'FAQ',
+    state TEXT DEFAULT 'Andhra Pradesh',
+    district TEXT,
+    market TEXT,
     date DATE NOT NULL,
     min_price NUMERIC(10, 2),
     max_price NUMERIC(10, 2),
     modal_price NUMERIC(10, 2) NOT NULL,
     arrival_qty_quintals NUMERIC(12, 2) DEFAULT 0,
+    unit TEXT DEFAULT 'quintal',
+    source TEXT DEFAULT 'Government of India / AGMARKNET',
+    source_url TEXT DEFAULT 'https://agmarknet.gov.in',
+    source_record_id TEXT,
+    data_status TEXT DEFAULT 'LATEST AVAILABLE',
+    observed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_market_crop_date UNIQUE (market_id, crop_id, date)
 );
@@ -202,15 +219,37 @@ CREATE TABLE IF NOT EXISTS public.logistics (
 CREATE TABLE IF NOT EXISTS public.storage_facilities (
     id TEXT PRIMARY KEY DEFAULT ('storage-' || substr(md5(random()::text), 1, 10)),
     name TEXT NOT NULL,
+    type TEXT DEFAULT 'Cold Storage',
     location TEXT,
     district TEXT NOT NULL,
+    state TEXT DEFAULT 'Andhra Pradesh',
+    address TEXT,
+    pincode TEXT,
+    latitude NUMERIC(9, 6),
+    longitude NUMERIC(9, 6),
     capacity_quintals NUMERIC(12, 2) NOT NULL,
     available_capacity_quintals NUMERIC(12, 2) NOT NULL,
     cost_per_day_per_quintal NUMERIC(8, 2) NOT NULL,
+    temperature_controlled BOOLEAN DEFAULT TRUE,
     crop_suitability TEXT,
     contact TEXT,
     verified BOOLEAN DEFAULT FALSE,
+    source TEXT DEFAULT 'SEEDED / DEMO',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14B. MARKET DATA SYNC LOGS
+CREATE TABLE IF NOT EXISTS public.market_data_sync_logs (
+    id TEXT PRIMARY KEY DEFAULT ('sync-' || substr(md5(random()::text), 1, 10)),
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    records_fetched INTEGER DEFAULT 0,
+    records_inserted INTEGER DEFAULT 0,
+    records_updated INTEGER DEFAULT 0,
+    records_rejected INTEGER DEFAULT 0,
+    details JSONB,
+    synced_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 15. PAYMENTS

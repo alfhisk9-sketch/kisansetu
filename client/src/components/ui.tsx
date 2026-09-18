@@ -83,14 +83,23 @@ export function StatusBadge({ status }: { status: string }) {
  * Honest Data Indicator
  * Clearly separates Verified Live data from Seeded / Estimates / Forecasts
  */
-export function DataBadge({ type = "UPDATED", note }: { type?: "LIVE" | "UPDATED" | "ESTIMATED" | "FORECAST" | "SEEDED"; note?: string }) {
+export type DataBadgeType = "LIVE" | "LATEST" | "LATEST AVAILABLE" | "UPDATED" | "ESTIMATED" | "FORECAST" | "SEEDED" | "DEMO" | "HISTORICAL" | "RECENT";
+
+export function DataBadge({ type = "UPDATED", note }: { type?: DataBadgeType; note?: string }) {
   const styles: Record<string, string> = {
     LIVE: "bg-emerald-50 text-emerald-700 border-emerald-300",
+    LATEST: "bg-teal-50 text-teal-700 border-teal-300",
+    "LATEST AVAILABLE": "bg-teal-50 text-teal-700 border-teal-300",
     UPDATED: "bg-sky-50 text-sky-700 border-sky-200",
+    RECENT: "bg-blue-50 text-blue-700 border-blue-200",
+    HISTORICAL: "bg-stone-100 text-stone-700 border-stone-300",
     ESTIMATED: "bg-amber-50 text-amber-700 border-amber-200",
     FORECAST: "bg-indigo-50 text-indigo-700 border-indigo-200",
     SEEDED: "bg-stone-100 text-stone-600 border-stone-200",
+    DEMO: "bg-amber-50 text-amber-800 border-amber-300",
   };
+
+  const displayType = type === "LATEST" ? "LATEST AVAILABLE" : type;
 
   return (
     <span 
@@ -98,7 +107,7 @@ export function DataBadge({ type = "UPDATED", note }: { type?: "LIVE" | "UPDATED
       title={note || `${type} data from platform`}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-      {type}
+      {displayType}
     </span>
   );
 }
