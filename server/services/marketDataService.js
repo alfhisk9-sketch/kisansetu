@@ -102,6 +102,114 @@ export const VERIFIED_MANDIS = [
     pincode: "360003",
     location_source: "verified_apmc_directory",
     status: "active"
+  },
+  {
+    id: "mkt-pimpalgaon",
+    name: "Kurnool APMC Yard",
+    district: "Kurnool",
+    state: "Andhra Pradesh",
+    lat: 15.8281,
+    lng: 78.0373,
+    address: "APMC Market Yard, Bellary Road, Kurnool",
+    pincode: "518003",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-manmad",
+    name: "Anantapur APMC Yard",
+    district: "Anantapur",
+    state: "Andhra Pradesh",
+    lat: 14.6819,
+    lng: 77.6006,
+    address: "Clock Tower Road, Market Yard, Anantapur",
+    pincode: "515001",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-pune",
+    name: "Vijayawada APMC Yard",
+    district: "Krishna",
+    state: "Andhra Pradesh",
+    lat: 16.5062,
+    lng: 80.6480,
+    address: "Bhavanipuram APMC Market Yard, Vijayawada",
+    pincode: "520012",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-solapur",
+    name: "Nellore APMC Yard",
+    district: "Nellore",
+    state: "Andhra Pradesh",
+    lat: 14.4426,
+    lng: 79.9865,
+    address: "Trunk Road, Market Yard, Nellore",
+    pincode: "524001",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-sangli",
+    name: "Chittoor APMC Yard",
+    district: "Chittoor",
+    state: "Andhra Pradesh",
+    lat: 13.2172,
+    lng: 79.1003,
+    address: "APMC Market Yard, Bengaluru Road, Chittoor",
+    pincode: "517001",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-kolhapur",
+    name: "Kadapa APMC Yard",
+    district: "Kadapa",
+    state: "Andhra Pradesh",
+    lat: 14.4673,
+    lng: 78.8241,
+    address: "APMC Market Yard, Seven Roads, Kadapa",
+    pincode: "516001",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-nagpur",
+    name: "Visakhapatnam APMC Yard",
+    district: "Visakhapatnam",
+    state: "Andhra Pradesh",
+    lat: 17.6868,
+    lng: 83.2185,
+    address: "Anandapuram APMC Market Yard, Visakhapatnam",
+    pincode: "530001",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-ahilyanagar",
+    name: "Eluru APMC Yard",
+    district: "West Godavari",
+    state: "Andhra Pradesh",
+    lat: 16.7107,
+    lng: 81.0952,
+    address: "APMC Yard, Sanivarapupeta, Eluru",
+    pincode: "534005",
+    location_source: "verified_apmc_directory",
+    status: "active"
+  },
+  {
+    id: "mkt-aurangabad",
+    name: "Kakinada APMC Yard",
+    district: "East Godavari",
+    state: "Andhra Pradesh",
+    lat: 16.9891,
+    lng: 82.2475,
+    address: "APMC Yard, Main Road, Kakinada",
+    pincode: "533001",
+    location_source: "verified_apmc_directory",
+    status: "active"
   }
 ];
 

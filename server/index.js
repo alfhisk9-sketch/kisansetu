@@ -57,6 +57,8 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
+import { checkSupabaseHealth } from "./lib/supabase.js";
+
 // Health checks (both root /health and /api/health for Render/monitoring)
 const healthHandler = (req, res) => {
   res.json({
@@ -69,6 +71,39 @@ const healthHandler = (req, res) => {
 
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
+
+// Strict Production Database Guard:
+// In production (NODE_ENV=production), KisanSetu enforces that Supabase PostgreSQL is reachable.
+// It will NEVER silently serve stale local SQLite fallback in production mode.
+let _supabaseHealthyCached = null;
+let _lastHealthCheck = 0;
+
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/health") return next();
+
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (!isProduction) {
+    return next();
+  }
+
+  const now = Date.now();
+  if (_supabaseHealthyCached === null || (now - _lastHealthCheck > 15000)) {
+    const health = await checkSupabaseHealth();
+    _supabaseHealthyCached = (health.status === "healthy");
+    _lastHealthCheck = now;
+  }
+
+  if (!_supabaseHealthyCached) {
+    return res.status(503).json({
+      error: "Production Database Unavailable",
+      message: "KisanSetu is running in production mode (NODE_ENV=production). Supabase PostgreSQL must be configured and initialized. Please execute server/supabase-schema.sql in the Supabase SQL Editor.",
+      status: "database_uninitialized",
+      mode: "supabase-postgres"
+    });
+  }
+
+  next();
+});
 
 // API Route Mounts
 app.use("/api/auth", authRoutes);
