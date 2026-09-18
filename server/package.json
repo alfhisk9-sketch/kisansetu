@@ -8,6 +8,7 @@
     "seed:if-empty": "node seed-if-empty.js",
     "market-data:sync": "node jobs/marketDataSync.js",
     "market-data:seed": "node jobs/marketDataSync.js",
+    "supabase:sync": "node jobs/supabaseSyncAll.js",
     "dev": "node index.js",
     "start": "node index.js"
   },

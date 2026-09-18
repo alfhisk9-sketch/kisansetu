@@ -150,14 +150,15 @@ const buyersList = [
 for (const b of buyersList) insBuyer.run(b.id, b.user_id, b.name, b.type, b.location, b.verified, b.docs, b.txns, b.pay, b.resp, "+91-98xxxxxxx" + b.id.slice(-2));
 
 // ---------------- STORAGE FACILITIES ----------------
-const insStorage = db.prepare(`INSERT INTO storage_facilities (id, name, location, district, capacity_quintals, available_capacity_quintals, cost_per_day_per_quintal, crop_suitability, contact, verified) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+const insStorage = db.prepare(`INSERT INTO storage_facilities (id, name, location, district, capacity_quintals, available_capacity_quintals, cost_per_day_per_quintal, crop_suitability, contact, verified, latitude, longitude, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const storageList = [
-  { id: "store-1", name: "Guntur District Warehousing Corp - Duggirala", location: "Duggirala", district: "Guntur", cap: 5000, avail: 1800, cost: 1.2, crops: "Onion,Wheat,Maize" },
-  { id: "store-2", name: "Tenali Cold Storage & Godown", location: "Tenali", district: "Guntur", cap: 3000, avail: 900, cost: 1.5, crops: "Onion,Grapes" },
-  { id: "store-3", name: "Vijayawada Rural Godown Facility", location: "Vijayawada", district: "Krishna", cap: 4000, avail: 2200, cost: 1.1, crops: "Tomato,Onion,Soybean" },
-  { id: "store-4", name: "Nellore APMC Warehouse", location: "Nellore", district: "Nellore", cap: 6000, avail: 3100, cost: 0.95, crops: "Pomegranate,Cotton,Soybean" },
+  { id: "store-1", name: "Guntur District Warehousing Corp - Duggirala", location: "Duggirala", district: "Guntur", cap: 5000, avail: 1800, cost: 1.2, crops: "Onion,Wheat,Maize", lat: 16.3262, lng: 80.6278 },
+  { id: "store-2", name: "Tenali Cold Storage & Godown", location: "Tenali", district: "Guntur", cap: 3000, avail: 900, cost: 1.5, crops: "Onion,Grapes", lat: 16.2435, lng: 80.6400 },
+  { id: "store-3", name: "Vijayawada Rural Godown Facility", location: "Vijayawada", district: "Krishna", cap: 4000, avail: 2200, cost: 1.1, crops: "Tomato,Onion,Soybean", lat: 16.5160, lng: 80.6300 },
+  { id: "store-4", name: "Nellore APMC Warehouse", location: "Nellore", district: "Nellore", cap: 6000, avail: 3100, cost: 0.95, crops: "Pomegranate,Cotton,Soybean", lat: 14.4426, lng: 79.9865 },
 ];
-for (const s of storageList) insStorage.run(s.id, s.name, s.location, s.district, s.cap, s.avail, s.cost, s.crops, "APMC Office", 1);
+for (const s of storageList) insStorage.run(s.id, s.name, s.location, s.district, s.cap, s.avail, s.cost, s.crops, "APMC Office", 0, s.lat, s.lng, "SEEDED / DEMO");
+
 
 // ---------------- LOTS ----------------
 const insLot = db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status, is_aggregated, source_lot_ids) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
