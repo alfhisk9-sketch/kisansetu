@@ -76,70 +76,77 @@ ${question}
 
 Provide a helpful, grounded response following the system instructions.`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second timeout
+  const modelsToTry = [
+    process.env.GEMINI_MODEL || "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite"
+  ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }]
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: promptText }]
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }]
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: promptText }]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 500,
+              topP: 0.8
             }
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 500,
-            topP: 0.8
-          }
-        })
+          })
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidateText) {
+          return {
+            success: true,
+            text: candidateText.trim(),
+            source: model
+          };
+        }
+      } else {
+        const errText = await response.text();
+        console.warn(`Gemini model ${model} returned HTTP ${response.status}:`, errText.substring(0, 100));
+        lastError = `HTTP ${response.status}`;
+        // If 503 or 429, loop continues to try next fallback model
+        if (response.status !== 503 && response.status !== 429 && response.status !== 404) {
+          break;
+        }
       }
-    );
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`Gemini API error (HTTP ${response.status}):`, errText);
-      return {
-        success: false,
-        source: "api-error",
-        message: `Gemini API responded with status ${response.status}`
-      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastError = err.message;
+      if (err.name === "AbortError") {
+        console.warn(`Gemini model ${model} timed out after 10s.`);
+      }
     }
-
-    const data = await response.json();
-    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!candidateText) {
-      return {
-        success: false,
-        source: "empty-response",
-        message: "No content generated."
-      };
-    }
-
-    return {
-      success: true,
-      text: candidateText.trim(),
-      source: "gemini-1.5-flash"
-    };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    console.error("Gemini request failed:", error.message);
-    return {
-      success: false,
-      source: error.name === "AbortError" ? "timeout" : "network-error",
-      message: error.message
-    };
   }
+
+  return {
+    success: false,
+    source: "api-error",
+    message: lastError || "All Gemini models unavailable"
+  };
 }

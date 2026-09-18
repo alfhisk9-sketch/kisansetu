@@ -106,6 +106,14 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) {
     // Writes are never intercepted or queued here — see note at top of file.
     if (req.method !== "GET") return;
+    // Never cache sensitive authenticated user, admin, or AI endpoints
+    if (
+      url.pathname.startsWith("/api/auth/") ||
+      url.pathname.startsWith("/api/admin/") ||
+      url.pathname.startsWith("/api/assistant/")
+    ) {
+      return;
+    }
     event.respondWith(handleApiGet(req));
     return;
   }

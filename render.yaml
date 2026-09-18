@@ -16,6 +16,10 @@ services:
         value: 10000
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      - key: SESSION_SECRET
+        generateValue: true
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

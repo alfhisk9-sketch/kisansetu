@@ -19,7 +19,7 @@ Add the key to your server environment:
 
 In `server/.env`:
 ```env
-GEMINI_API_KEY=AIzaSy...your_gemini_api_key_here
+GEMINI_API_KEY=
 ```
 
 On Render / Cloud Hosting:

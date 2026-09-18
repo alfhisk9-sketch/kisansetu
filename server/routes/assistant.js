@@ -37,7 +37,7 @@ function ruleBasedAnswer(question, context) {
   return "Namaste! I am KisanSetu AI Saathi. I can help you analyze net realizations, quality grading, mandi prices, and buyer demands using verified platform data. Try asking: 'Where should I sell my crop?', 'What is Grade A?', or 'How does transport cost affect my earnings?'";
 }
 
-router.post("/ask", async (req, res) => {
+const askHandler = async (req, res) => {
   const { question, lotId, cropId, district, userId, locale = "en" } = req.body;
   if (!question || typeof question !== "string" || !question.trim()) {
     return res.status(400).json({ error: "question is required" });
@@ -169,7 +169,7 @@ router.post("/ask", async (req, res) => {
   if (aiResult.success) {
     return res.json({
       answer: aiResult.text,
-      source: "gemini-1.5-flash",
+      source: aiResult.source || "gemini",
       configured: true,
       contextSnippet: {
         crop: context.crop?.name,
@@ -187,6 +187,9 @@ router.post("/ask", async (req, res) => {
     note: "AI Assistant temporarily fell back to verified platform data rules due to upstream service latency.",
     detail: aiResult.message
   });
-});
+};
+
+router.post("/ask", askHandler);
+router.post("/chat", askHandler);
 
 export default router;

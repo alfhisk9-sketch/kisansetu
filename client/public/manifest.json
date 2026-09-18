@@ -1,13 +1,13 @@
 {
-  "name": "KisanSetu",
+  "name": "KisanSetu — Agricultural Marketplace",
   "short_name": "KisanSetu",
-  "description": "Prototype for SIH Problem Statement 26132 — market linkages and price discovery for farmers.",
-  "start_url": "/dashboard",
+  "description": "Smart Agricultural Market Linkage & Price Discovery Platform for Indian Farmers and Traders.",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#f5f5f4",
-  "theme_color": "#3d6f2e",
+  "background_color": "#F8FAF8",
+  "theme_color": "#0B6E4F",
   "lang": "en",
   "icons": [
     {

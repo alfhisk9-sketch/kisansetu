@@ -9,6 +9,21 @@ import { initSchema } from "./db.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, "..", "client", "dist");
 
+// Load local environment files if present
+const envCandidates = [
+  path.join(__dirname, ".env"),
+  path.join(__dirname, "..", ".env"),
+];
+for (const envPath of envCandidates) {
+  if (existsSync(envPath)) {
+    try {
+      if (typeof process.loadEnvFile === "function") {
+        process.loadEnvFile(envPath);
+      }
+    } catch (_) {}
+  }
+}
+
 import authRoutes from "./routes/auth.js";
 import cropsRoutes from "./routes/crops.js";
 import marketRoutes from "./routes/markets.js";
