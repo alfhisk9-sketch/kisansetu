@@ -11,16 +11,16 @@ router.get("/", async (req, res) => {
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
   let rows = null;
-  if (isProduction && supabase) {
+  if (isProduction) {
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
     try {
       const { data, error } = await supabase.from("storage_facilities").select("*");
-      if (!error && data && data.length > 0) {
-        rows = data;
-      }
-    } catch (_) {}
-  }
-
-  if (!rows) {
+      if (error) return res.status(500).json({ error: error.message });
+      rows = data || [];
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  } else {
     rows = db.prepare(`SELECT * FROM storage_facilities`).all();
   }
 

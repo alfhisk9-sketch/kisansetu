@@ -1,16 +1,48 @@
-import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
+const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, "data", "krishisetu.db");
 
-export const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+let _dbInstance = null;
+
+export function isOfflineDev() {
+  return process.env.NODE_ENV !== "production" || process.env.ALLOW_OFFLINE_DEV === "true";
+}
+
+export function getDb() {
+  if (!isOfflineDev()) {
+    throw new Error(
+      "SQLite (better-sqlite3) cannot be accessed in production mode (NODE_ENV=production, ALLOW_OFFLINE_DEV=false). " +
+      "All production operations must use Supabase PostgreSQL."
+    );
+  }
+  if (!_dbInstance) {
+    const Database = require("better-sqlite3");
+    _dbInstance = new Database(DB_PATH);
+    _dbInstance.pragma("journal_mode = WAL");
+    _dbInstance.pragma("foreign_keys = ON");
+  }
+  return _dbInstance;
+}
+
+export const db = new Proxy({}, {
+  get(target, prop) {
+    const instance = getDb();
+    const val = instance[prop];
+    if (typeof val === "function") {
+      return val.bind(instance);
+    }
+    return val;
+  }
+});
 
 export function initSchema() {
-  db.exec(`
+  if (!isOfflineDev()) return;
+  const database = getDb();
+  database.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,

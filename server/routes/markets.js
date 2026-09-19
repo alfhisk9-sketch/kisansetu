@@ -19,11 +19,15 @@ const router = Router();
 router.get("/", async (req, res) => {
   const supabase = getSupabaseAdmin();
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-  if (isProduction && supabase) {
+  if (isProduction) {
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
     try {
       const { data, error } = await supabase.from("markets").select("*").order("name");
-      if (!error && data && data.length > 0) return res.json(data);
-    } catch (_) {}
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
   }
   res.json(db.prepare(`SELECT * FROM markets ORDER BY name`).all());
 });
@@ -34,13 +38,17 @@ router.get("/prices", async (req, res) => {
   if (!cropId) return res.status(400).json({ error: "cropId is required" });
   const supabase = getSupabaseAdmin();
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-  if (isProduction && supabase) {
+  if (isProduction) {
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
     try {
       let q = supabase.from("market_prices").select("*").eq("crop_id", cropId).order("date", { ascending: true });
       if (marketId) q = q.eq("market_id", marketId);
       const { data, error } = await q;
-      if (!error && data && data.length > 0) return res.json(data);
-    } catch (_) {}
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
   }
   let rows;
   if (marketId) {
