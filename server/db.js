@@ -9,7 +9,19 @@ const DB_PATH = path.join(__dirname, "data", "krishisetu.db");
 let _dbInstance = null;
 
 export function isOfflineDev() {
-  return process.env.NODE_ENV !== "production" || process.env.ALLOW_OFFLINE_DEV === "true";
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_OFFLINE_DEV === "false") {
+    return false;
+  }
+  return process.env.ALLOW_OFFLINE_DEV === "true" || process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+}
+
+export function closeDb() {
+  if (_dbInstance) {
+    try {
+      _dbInstance.close();
+    } catch (_) {}
+    _dbInstance = null;
+  }
 }
 
 export function getDb() {
@@ -24,12 +36,26 @@ export function getDb() {
     _dbInstance = new Database(DB_PATH);
     _dbInstance.pragma("journal_mode = WAL");
     _dbInstance.pragma("foreign_keys = ON");
+
+    if (typeof process !== "undefined" && process.once) {
+      process.once("beforeExit", () => {
+        closeDb();
+      });
+    }
   }
   return _dbInstance;
 }
 
 export const db = new Proxy({}, {
   get(target, prop) {
+    if (!isOfflineDev()) {
+      return () => {
+        throw new Error(
+          "SQLite (better-sqlite3) cannot be accessed in production mode. " +
+          "All production operations must use Supabase PostgreSQL."
+        );
+      };
+    }
     const instance = getDb();
     const val = instance[prop];
     if (typeof val === "function") {

@@ -41,7 +41,7 @@ services:
     buildCommand: >
       cd client && npm install && npm run build &&
       cd ../server && npm install
-    startCommand: cd server && npm run seed:if-empty && npm start
+    startCommand: cd server && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -81,7 +81,7 @@ If you prefer configuring the Web Service manually on Render:
    ```
 5. **Start Command**:
    ```bash
-   cd server && npm run seed:if-empty && npm start
+   cd server && npm start
    ```
 6. **Health Check Path**: `/health`
 

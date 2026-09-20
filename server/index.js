@@ -4,7 +4,6 @@ import morgan from "morgan";
 import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
-import { initSchema } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, "..", "client", "dist");
@@ -39,9 +38,10 @@ import assistantRoutes from "./routes/assistant.js";
 import notificationsRoutes from "./routes/notifications.js";
 import forecastRoutes from "./routes/forecast.js";
 
-// Initialize local SQLite database schema for development / offline mode
-if (process.env.NODE_ENV !== "production" || process.env.ALLOW_OFFLINE_DEV === "true") {
+// Initialize local SQLite database schema ONLY in local / offline development mode
+if (process.env.NODE_ENV !== "production" && process.env.ALLOW_OFFLINE_DEV === "true") {
   try {
+    const { initSchema } = await import("./db.js");
     initSchema();
   } catch (err) {
     console.warn("SQLite schema initialization skipped/warning:", err.message);
