@@ -1,10 +1,32 @@
 import { createClient } from "@supabase/supabase-js";
 
+export function sanitizeEnvValue(val) {
+  if (!val) return "";
+  let clean = String(val).trim();
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
+  }
+  return clean;
+}
+
+export function getServiceKeyRole() {
+  const key = sanitizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  if (!key) return "MISSING";
+  try {
+    const parts = key.split(".");
+    if (parts.length < 2) return "INVALID_JWT_FORMAT";
+    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+    return payload.role || "unknown";
+  } catch {
+    return "DECODE_ERROR";
+  }
+}
+
 let _supabaseAdmin = null;
 
 export function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = sanitizeEnvValue(process.env.SUPABASE_URL);
+  const key = sanitizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
   if (!url || !key) return null;
   if (!_supabaseAdmin) {
     _supabaseAdmin = createClient(url, key, {
@@ -15,8 +37,8 @@ export function getSupabaseAdmin() {
 }
 
 export function getSupabaseConfig() {
-  const url = process.env.SUPABASE_URL || null;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
+  const url = sanitizeEnvValue(process.env.SUPABASE_URL) || null;
+  const key = sanitizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY) || null;
   const hasConfig = Boolean(url && key);
   return {
     configured: hasConfig,
@@ -34,8 +56,8 @@ export async function checkSupabaseHealth() {
     };
   }
 
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = sanitizeEnvValue(process.env.SUPABASE_URL);
+  const key = sanitizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   try {
     const res = await fetch(`${url}/rest/v1/crops?select=id&limit=1`, {

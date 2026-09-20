@@ -8,13 +8,17 @@ import { AUTHORITATIVE_CROPS_CATALOG } from "../services/cropMasterService.js";
 
 const router = Router();
 
+function useSupabase() {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const hasSupabaseConfig = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return isProduction || hasSupabaseConfig;
+}
+
 router.get("/", async (req, res) => {
   const { ownerId, ownerType, status } = req.query;
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-
   const catalogMap = new Map(AUTHORITATIVE_CROPS_CATALOG.map(c => [c.crop_id, c.name]));
 
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -49,10 +53,9 @@ router.get("/", async (req, res) => {
 });
 
 router.get("/:id", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
   const catalogMap = new Map(AUTHORITATIVE_CROPS_CATALOG.map(c => [c.crop_id, c.name]));
 
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -101,33 +104,32 @@ router.get("/:id", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const b = req.body || {};
-  const ownerType = b.ownerType || b.owner_type || (b.farmer_id ? "farmer" : "farmer");
-  const ownerId = b.ownerId || b.owner_id || b.farmer_id;
-  const cropId = b.cropId || b.crop_id;
-  const quantityQuintals = Number(b.quantityQuintals !== undefined ? b.quantityQuintals : (b.quantity_quintals !== undefined ? b.quantity_quintals : b.quantity));
-  const location = b.location || b.village;
-  const district = b.district;
+  try {
+    const b = req.body || {};
+    const ownerType = b.ownerType || b.owner_type || (b.farmer_id ? "farmer" : "farmer");
+    const ownerId = b.ownerId || b.owner_id || b.farmer_id;
+    const cropId = b.cropId || b.crop_id;
+    const quantityQuintals = Number(b.quantityQuintals !== undefined ? b.quantityQuintals : (b.quantity_quintals !== undefined ? b.quantity_quintals : b.quantity));
+    const location = b.location || b.village;
+    const district = b.district;
 
-  if (!ownerId || !cropId || !quantityQuintals || !location || !district) {
-    return res.status(400).json({
-      error: "Missing required lot fields. Required: ownerId (or farmer_id), cropId (or crop_id), quantityQuintals, location, district"
-    });
-  }
+    if (!ownerId || !cropId || !quantityQuintals || !location || !district) {
+      return res.status(400).json({
+        error: "Missing required lot fields. Required: ownerId (or farmer_id), cropId (or crop_id), quantityQuintals, location, district"
+      });
+    }
 
-  if (!cropId.startsWith("crop-")) {
-    return res.status(400).json({ error: `Invalid cropId '${cropId}'. Must be a canonical crop ID (e.g. crop-cotton)` });
-  }
+    if (!cropId.startsWith("crop-")) {
+      return res.status(400).json({ error: `Invalid cropId '${cropId}'. Must be a canonical crop ID (e.g. crop-cotton)` });
+    }
 
-  const catalogItem = AUTHORITATIVE_CROPS_CATALOG.find(c => c.crop_id === cropId);
-  const lotId = b.id || `LOT-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+    const catalogItem = AUTHORITATIVE_CROPS_CATALOG.find(c => c.crop_id === cropId);
+    const lotId = b.id || `LOT-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
 
-  if (isProduction) {
-    const supabase = getSupabaseAdmin();
-    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+    if (useSupabase()) {
+      const supabase = getSupabaseAdmin();
+      if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
-    try {
       const { data, error } = await supabase
         .from("lots")
         .insert({
@@ -151,34 +153,37 @@ router.post("/", async (req, res) => {
         .select()
         .single();
 
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) {
+        console.error("[POST /api/lots supabase error]:", error);
+        return res.status(500).json({ error: error.message });
+      }
       return res.status(201).json({
         ...data,
         crop_name: catalogItem?.name || "Produce"
       });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
     }
-  }
 
-  const db = getDb();
-  db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    lotId, ownerType, ownerId, cropId, b.variety || null, quantityQuintals, b.grade || "A",
-    location, district, b.harvestDate || b.harvest_date || null, b.availableFrom || b.available_from || null,
-    Number(b.expectedPrice || b.expected_price || 0),
-    b.minAcceptablePrice ? Number(b.minAcceptablePrice) : null,
-    b.storageAvailable ? 1 : 0, "Open for offers"
-  );
-  const row = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
-  res.status(201).json({ ...row, crop_name: catalogItem?.name || "Produce" });
+    const db = getDb();
+    db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      lotId, ownerType, ownerId, cropId, b.variety || null, quantityQuintals, b.grade || "A",
+      location, district, b.harvestDate || b.harvest_date || null, b.availableFrom || b.available_from || null,
+      Number(b.expectedPrice || b.expected_price || 0),
+      b.minAcceptablePrice ? Number(b.minAcceptablePrice) : null,
+      b.storageAvailable ? 1 : 0, "Open for offers"
+    );
+    const row = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
+    return res.status(201).json({ ...row, crop_name: catalogItem?.name || "Produce" });
+  } catch (err) {
+    console.error("[POST /api/lots unhandled error]:", err);
+    return res.status(500).json({ error: err.message || "Failed to create produce lot" });
+  }
 });
 
 router.put("/:id", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
   const b = req.body || {};
 
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -238,9 +243,7 @@ router.put("/:id", async (req, res) => {
 });
 
 router.patch("/:id/status", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -270,9 +273,7 @@ router.patch("/:id/status", async (req, res) => {
 });
 
 router.post("/:id/grade", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -316,10 +317,9 @@ router.post("/:id/grade", async (req, res) => {
 });
 
 router.get("/:id/storage-decision", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
   const { storageId, storageDays } = req.query;
 
-  if (isProduction) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 

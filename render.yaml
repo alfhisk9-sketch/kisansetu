@@ -30,3 +30,7 @@ services:
         sync: false
       - key: ALLOW_OFFLINE_DEV
         value: "false"
+      - key: ADMIN_USERNAME
+        value: alfhisk
+      - key: ADMIN_PASSWORD
+        sync: false

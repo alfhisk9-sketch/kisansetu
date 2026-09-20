@@ -63,14 +63,31 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-import { checkSupabaseHealth } from "./lib/supabase.js";
+import { checkSupabaseHealth, getServiceKeyRole, getSupabaseAdmin } from "./lib/supabase.js";
 
 // Health checks (both root /health and /api/health for Render/monitoring)
-const healthHandler = (req, res) => {
+const healthHandler = async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const supabase = getSupabaseAdmin();
+  const serviceKeyRole = getServiceKeyRole();
   res.json({
     status: "ok",
     service: "kisansetu-platform",
-    version: "2.0.0",
+    version: "2.0.2",
+    env: {
+      NODE_ENV: process.env.NODE_ENV || "UNSET",
+      ALLOW_OFFLINE_DEV: process.env.ALLOW_OFFLINE_DEV || "UNSET",
+      isProduction,
+      hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+      hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      serviceKeyRole,
+      hasAdminUsername: Boolean(process.env.ADMIN_USERNAME),
+      hasAdminPassword: Boolean(process.env.ADMIN_PASSWORD),
+      hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY)
+    },
+    supabase: {
+      clientInitialized: Boolean(supabase)
+    },
     timestamp: new Date().toISOString()
   });
 };
@@ -85,7 +102,7 @@ let _supabaseHealthyCached = null;
 let _lastHealthCheck = 0;
 
 app.use("/api", async (req, res, next) => {
-  if (req.path === "/health") return next();
+  if (req.path === "/health" || req.path === "/health/" || req.originalUrl.includes("/health")) return next();
 
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
   if (!isProduction) {
@@ -153,7 +170,17 @@ const PORT = process.env.PORT || 4000;
 let server;
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMainModule) {
-  server = app.listen(PORT, () => console.log(`KisanSetu Platform API running on http://localhost:${PORT}`));
+  server = app.listen(PORT, async () => {
+    console.log(`KisanSetu Platform API running on http://localhost:${PORT}`);
+    if (process.env.ADMIN_PASSWORD) {
+      try {
+        const { provisionOwnerAdmin } = await import("./scripts/provisionAdmin.js");
+        await provisionOwnerAdmin();
+      } catch (err) {
+        console.warn("[Startup] Admin account auto-sync notice:", err.message);
+      }
+    }
+  });
 }
 export { app, server };
 export default app;
