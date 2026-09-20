@@ -63,11 +63,11 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-import { checkSupabaseHealth, getServiceKeyRole, getSupabaseAdmin } from "./lib/supabase.js";
+import { checkSupabaseHealth, getServiceKeyRole, getSupabaseAdmin, isProductionEnv } from "./lib/supabase.js";
 
 // Health checks (both root /health and /api/health for Render/monitoring)
 const healthHandler = async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const isProduction = isProductionEnv();
   const supabase = getSupabaseAdmin();
   const serviceKeyRole = getServiceKeyRole();
   res.json({
@@ -104,7 +104,7 @@ let _lastHealthCheck = 0;
 app.use("/api", async (req, res, next) => {
   if (req.path === "/health" || req.path === "/health/" || req.originalUrl.includes("/health")) return next();
 
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const isProduction = isProductionEnv();
   if (!isProduction) {
     return next();
   }

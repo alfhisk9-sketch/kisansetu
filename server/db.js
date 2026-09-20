@@ -9,10 +9,16 @@ const DB_PATH = path.join(__dirname, "data", "krishisetu.db");
 let _dbInstance = null;
 
 export function isOfflineDev() {
-  if (process.env.NODE_ENV === "production" || process.env.ALLOW_OFFLINE_DEV === "false") {
+  if (process.env.ALLOW_OFFLINE_DEV === "true") return true;
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.ALLOW_OFFLINE_DEV === "false" ||
+    Boolean(process.env.RENDER) ||
+    Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+  ) {
     return false;
   }
-  return process.env.ALLOW_OFFLINE_DEV === "true" || process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 }
 
 export function closeDb() {

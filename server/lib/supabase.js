@@ -9,6 +9,16 @@ export function sanitizeEnvValue(val) {
   return clean;
 }
 
+export function isProductionEnv() {
+  if (process.env.ALLOW_OFFLINE_DEV === "true") return false;
+  return (
+    process.env.NODE_ENV === "production" ||
+    process.env.ALLOW_OFFLINE_DEV === "false" ||
+    Boolean(process.env.RENDER) ||
+    Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+  );
+}
+
 export function getServiceKeyRole() {
   const key = sanitizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
   if (!key) return "MISSING";
