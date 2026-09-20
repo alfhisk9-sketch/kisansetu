@@ -7,9 +7,7 @@ import { hashPassword, verifyPassword, generateToken } from "../lib/security.js"
 import {
   authenticateUser,
   registerUser,
-  syncDemoAccountsToSupabase,
-  fetchUserProfile,
-  DEMO_ACCOUNTS_METADATA
+  fetchUserProfile
 } from "../services/authService.js";
 import { getRequestUser } from "../lib/authMiddleware.js";
 
@@ -49,33 +47,6 @@ router.post("/register", async (req, res) => {
   } catch (err) {
     console.error("Register route error:", err);
     res.status(500).json({ error: "Registration service encountered an error. Please try again." });
-  }
-});
-
-/**
- * List verified demo accounts
- */
-router.get("/demo-accounts", (req, res) => {
-  res.json({
-    note: "Demo credentials for reviewers and evaluators. Password is 'demo123' for all accounts.",
-    accounts: DEMO_ACCOUNTS_METADATA.map((d) => ({
-      role: d.role,
-      username: d.username,
-      name: `${d.name} (${d.roleTitle})`
-    }))
-  });
-});
-
-/**
- * Safe on-demand demo account provisioning endpoint
- */
-router.post("/sync-demo", async (req, res) => {
-  try {
-    const result = await syncDemoAccountsToSupabase();
-    res.json(result);
-  } catch (err) {
-    console.error("Demo sync route error:", err);
-    res.status(500).json({ error: err.message });
   }
 });
 

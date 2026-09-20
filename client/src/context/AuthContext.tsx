@@ -17,7 +17,7 @@ interface AuthState {
   isGoogleAuthAvailable: boolean;
   needsRoleSelection: boolean;
   pendingOAuthUser: PendingOAuthUser | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<User>;
   loginWithGoogle: () => Promise<void>;
   completeOAuthRegistration: (role: "farmer" | "buyer" | "fpo") => Promise<void>;
   cancelOAuthRegistration: () => void;
@@ -109,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
     setProfile(data.profile);
     localStorage.setItem("krishisetu_session", JSON.stringify(data));
+    return data.user;
   }
 
   async function loginWithGoogle() {
@@ -127,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) {
       if (error.message?.includes("provider is not enabled") || (error as any).code === "validation_failed") {
-        throw new Error("Google Sign-In is not currently enabled in the Supabase project dashboard. Please configure Google OAuth credentials in Supabase Auth Providers, or sign in with your username/demo account.");
+        throw new Error("Google Sign-In is not currently enabled in the Supabase project dashboard. Please configure Google OAuth credentials in Supabase Auth Providers, or sign in with your username and password.");
       }
       throw error;
     }

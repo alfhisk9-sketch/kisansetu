@@ -3,222 +3,6 @@ import { hashPassword, generateToken, verifyPassword } from "../lib/security.js"
 import { isOfflineDev, getDb } from "../db.js";
 import { nanoid } from "nanoid";
 
-export const DEMO_ACCOUNTS_METADATA = [
-  {
-    username: "shaik.rabbani",
-    name: "Shaik Rabbani",
-    role: "farmer",
-    email: "shaik.rabbani@kisansetu.in",
-    phone: "9440010001",
-    location: "Duggirala, Guntur",
-    village: "Duggirala",
-    district: "Guntur",
-    landHoldingAcres: 4.5,
-    roleTitle: "Farmer"
-  },
-  {
-    username: "shaik.alfhi",
-    name: "Shaik Alfhi",
-    role: "farmer",
-    email: "shaik.alfhi@kisansetu.in",
-    phone: "9440010002",
-    location: "Tenali, Guntur",
-    village: "Tenali",
-    district: "Guntur",
-    landHoldingAcres: 2.8,
-    roleTitle: "Farmer 2"
-  },
-  {
-    username: "koushik",
-    name: "Koushik",
-    role: "fpo",
-    email: "koushik@kisansetu.in",
-    phone: "9440010010",
-    location: "Guntur",
-    district: "Guntur",
-    registrationNo: "FPO/AP/2019/1042",
-    memberCount: 42,
-    roleTitle: "FPO Lead"
-  },
-  {
-    username: "d.krishna",
-    name: "D. Krishna",
-    role: "buyer",
-    email: "d.krishna@kisansetu.in",
-    phone: "9440010020",
-    location: "Vijayawada",
-    buyerType: "Wholesaler",
-    verified: true,
-    roleTitle: "Wholesaler"
-  },
-  {
-    username: "akshay",
-    name: "Akshay",
-    role: "buyer",
-    email: "akshay@kisansetu.in",
-    phone: "9440010021",
-    location: "Visakhapatnam",
-    buyerType: "Digital trader",
-    verified: true,
-    roleTitle: "Trader"
-  },
-  {
-    username: "hemasri",
-    name: "Hemasri",
-    role: "admin",
-    email: "hemasri@kisansetu.in",
-    phone: "9440010099",
-    location: "Vijayawada",
-    roleTitle: "Admin"
-  }
-];
-
-export const DEMO_PASSWORD = "demo123";
-
-/**
- * Idempotently provisions demo accounts into Supabase Auth and Supabase PostgreSQL.
- * Safe to run multiple times without creating duplicates.
- */
-export async function syncDemoAccountsToSupabase() {
-  const supabase = getSupabaseAdmin();
-  if (!supabase) {
-    throw new Error("Supabase admin client is not configured (missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY).");
-  }
-
-  // 1. Fetch existing Supabase Auth users
-  const { data: authList, error: listErr } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-  if (listErr) {
-    throw new Error(`Failed to list Supabase Auth users: ${listErr.message}`);
-  }
-
-  const existingAuthByEmail = new Map(
-    (authList?.users || []).map((u) => [u.email?.toLowerCase(), u])
-  );
-
-  const results = [];
-
-  for (const demo of DEMO_ACCOUNTS_METADATA) {
-    const demoEmail = demo.email.toLowerCase();
-    let authUser = existingAuthByEmail.get(demoEmail);
-
-    if (!authUser) {
-      // Create user in Supabase Auth authority
-      const { data: createData, error: createErr } = await supabase.auth.admin.createUser({
-        email: demoEmail,
-        password: DEMO_PASSWORD,
-        email_confirm: true,
-        user_metadata: {
-          username: demo.username,
-          display_name: demo.name,
-          role: demo.role,
-          phone: demo.phone
-        }
-      });
-
-      if (createErr) {
-        console.error(`Failed to create demo auth user ${demo.username}:`, createErr.message);
-        results.push({ username: demo.username, status: "auth_create_failed", error: createErr.message });
-        continue;
-      }
-      authUser = createData.user;
-    } else {
-      // Update password and metadata to guarantee demo123 always works
-      await supabase.auth.admin.updateUserById(authUser.id, {
-        password: DEMO_PASSWORD,
-        email_confirm: true,
-        user_metadata: {
-          username: demo.username,
-          display_name: demo.name,
-          role: demo.role,
-          phone: demo.phone
-        }
-      });
-    }
-
-    const userId = authUser.id;
-
-    // 2. Synchronize Supabase public.users row
-    const userPayload = {
-      id: userId,
-      username: demo.username,
-      password_hash: hashPassword(DEMO_PASSWORD),
-      role: demo.role,
-      display_name: demo.name,
-      phone: demo.phone,
-      location: demo.location,
-      updated_at: new Date().toISOString()
-    };
-
-    const { error: userErr } = await supabase
-      .from("users")
-      .upsert(userPayload, { onConflict: "username" });
-
-    if (userErr) {
-      console.error(`Failed to upsert demo public.user ${demo.username}:`, userErr.message);
-      results.push({ username: demo.username, status: "public_user_failed", error: userErr.message });
-      continue;
-    }
-
-    // 3. Synchronize role-specific profile row in Supabase PostgreSQL
-    if (demo.role === "farmer") {
-      const { data: existingFarmer } = await supabase
-        .from("farmers")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      const farmerId = existingFarmer?.id || `farmer-${userId.slice(0, 10)}`;
-      await supabase.from("farmers").upsert({
-        id: farmerId,
-        user_id: userId,
-        name: demo.name,
-        village: demo.village,
-        district: demo.district,
-        land_holding_acres: demo.landHoldingAcres,
-        phone: demo.phone
-      }, { onConflict: "id" });
-    } else if (demo.role === "fpo") {
-      const { data: existingFpo } = await supabase
-        .from("fpos")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      const fpoId = existingFpo?.id || `fpo-${userId.slice(0, 10)}`;
-      await supabase.from("fpos").upsert({
-        id: fpoId,
-        user_id: userId,
-        name: demo.name,
-        district: demo.district,
-        registration_no: demo.registrationNo,
-        member_count: demo.memberCount,
-        contact: demo.phone
-      }, { onConflict: "id" });
-    } else if (demo.role === "buyer") {
-      const { data: existingBuyer } = await supabase
-        .from("buyers")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      const buyerId = existingBuyer?.id || `buyer-${userId.slice(0, 10)}`;
-      await supabase.from("buyers").upsert({
-        id: buyerId,
-        user_id: userId,
-        name: demo.name,
-        buyer_type: demo.buyerType,
-        location: demo.location,
-        verified: demo.verified,
-        contact: demo.phone
-      }, { onConflict: "id" });
-    }
-
-    results.push({ username: demo.username, role: demo.role, userId, status: "synced" });
-  }
-
-  return { success: true, count: results.length, results };
-}
-
 /**
  * Fetch full user profile & role profile for a given user from Supabase or SQLite
  */
@@ -295,7 +79,7 @@ export async function authenticateUser({ username, password }) {
     const trimmed = username.trim();
     let emailToAuth = trimmed;
 
-    // 1. If username is not an email, find corresponding user record or demo account email
+    // 1. If username is not an email, find corresponding user record and resolve email
     let publicUser = null;
     const { data: foundUser } = await supabase
       .from("users")
@@ -305,19 +89,23 @@ export async function authenticateUser({ username, password }) {
 
     if (foundUser) {
       publicUser = foundUser;
-      const demoMatch = DEMO_ACCOUNTS_METADATA.find(
-        (d) => d.username.toLowerCase() === publicUser.username.toLowerCase()
-      );
-      emailToAuth = demoMatch ? demoMatch.email : (publicUser.email || `${publicUser.username}@kisansetu.in`);
-    } else {
-      const demoMatch = DEMO_ACCOUNTS_METADATA.find(
-        (d) => d.username.toLowerCase() === trimmed.toLowerCase()
-      );
-      if (demoMatch) {
-        emailToAuth = demoMatch.email;
-      } else if (!trimmed.includes("@")) {
-        emailToAuth = `${trimmed}@kisansetu.in`;
+      if (publicUser.email) {
+        emailToAuth = publicUser.email;
+      } else {
+        // Resolve email directly from Supabase Auth user record
+        try {
+          const { data: authUserData } = await supabase.auth.admin.getUserById(foundUser.id);
+          if (authUserData?.user?.email) {
+            emailToAuth = authUserData.user.email;
+          } else {
+            emailToAuth = trimmed.includes("@") ? trimmed : `${trimmed.toLowerCase()}@kisansetu.in`;
+          }
+        } catch {
+          emailToAuth = trimmed.includes("@") ? trimmed : `${trimmed.toLowerCase()}@kisansetu.in`;
+        }
       }
+    } else {
+      emailToAuth = trimmed.includes("@") ? trimmed : `${trimmed.toLowerCase()}@kisansetu.in`;
     }
 
     // 2. Validate credentials via Supabase Auth AUTHORITY using an ephemeral client
@@ -333,23 +121,6 @@ export async function authenticateUser({ username, password }) {
     });
 
     if (authError || !authResult?.user) {
-      // If demo user login failed, try syncing demo users once then retry
-      const isDemo = DEMO_ACCOUNTS_METADATA.some((d) => d.username.toLowerCase() === trimmed.toLowerCase());
-      if (isDemo) {
-        try {
-          await syncDemoAccountsToSupabase();
-          const { data: retryAuth, error: retryErr } = await authClient.auth.signInWithPassword({
-            email: emailToAuth,
-            password: password
-          });
-          if (retryAuth?.user) {
-            return await buildSessionResponse(retryAuth.user, supabase, true);
-          }
-        } catch (e) {
-          console.warn("Demo account on-demand sync error:", e.message);
-        }
-      }
-
       return {
         success: false,
         statusCode: 401,

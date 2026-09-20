@@ -7,6 +7,9 @@ import { syncMarketData, getLatestSyncStatus } from "../services/marketDataServi
 
 const router = Router();
 
+// Strict RBAC: All /api/admin/* endpoints require the 'admin' role
+router.use(requireRole(["admin"]));
+
 router.get("/summary", async (req, res) => {
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
@@ -191,6 +194,40 @@ router.get("/market-data/sync-status", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch sync status", detail: err.message });
   }
+});
+
+router.get("/users", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+    try {
+      const { data, error } = await supabase.from("users").select("id, username, role, display_name, phone, location, created_at").order("created_at", { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+  const db = getDb();
+  res.json(db.prepare("SELECT id, username, role, display_name, phone, location, created_at FROM users ORDER BY created_at DESC").all());
+});
+
+router.get("/forecast-runs", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+    try {
+      const { data, error } = await supabase.from("forecast_runs").select("*").order("created_at", { ascending: false }).limit(20);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+  const db = getDb();
+  res.json(db.prepare("SELECT * FROM forecast_runs ORDER BY created_at DESC LIMIT 20").all());
 });
 
 export default router;

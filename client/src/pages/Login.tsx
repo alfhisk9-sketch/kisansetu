@@ -16,22 +16,17 @@ export default function Login() {
   const [selectedRole, setSelectedRole] = useState<"farmer" | "buyer" | "fpo">("farmer");
   const [roleSubmitting, setRoleSubmitting] = useState(false);
 
-  const DEMO_ACCOUNTS = [
-    { label: "Farmer", user: "shaik.rabbani", roleColor: "bg-emerald-50 text-emerald-800 border-emerald-200" },
-    { label: "Farmer 2", user: "shaik.alfhi", roleColor: "bg-emerald-50 text-emerald-800 border-emerald-200" },
-    { label: "FPO Lead", user: "koushik", roleColor: "bg-sky-50 text-sky-800 border-sky-200" },
-    { label: "Wholesaler", user: "d.krishna", roleColor: "bg-indigo-50 text-indigo-800 border-indigo-200" },
-    { label: "Trader", user: "akshay", roleColor: "bg-indigo-50 text-indigo-800 border-indigo-200" },
-    { label: "Admin", user: "hemasri", roleColor: "bg-purple-50 text-purple-800 border-purple-200" },
-  ];
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await login(username, password);
-      navigate("/dashboard");
+      const authUser = await login(username, password);
+      if (authUser?.role === "admin") {
+        navigate("/admin");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err: any) {
       setError(err.message || t("login.loginFailed"));
     } finally {
@@ -59,11 +54,6 @@ export default function Login() {
       setError(err.message || "Failed to finalize account role");
       setRoleSubmitting(false);
     }
-  }
-
-  function pickDemo(demoUser: string) {
-    setUsername(demoUser);
-    setPassword("demo123");
   }
 
   return (
@@ -272,28 +262,7 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Quick Demo Credentials Switcher */}
-          <div className="mt-6 pt-5 border-t border-stone-100">
-            <div className="text-[11px] font-bold text-dark-muted uppercase tracking-wider mb-2 text-center">
-              Quick One-Click Demo Logins
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {DEMO_ACCOUNTS.map((d) => (
-                <button
-                  key={d.user}
-                  type="button"
-                  onClick={() => pickDemo(d.user)}
-                  className={`text-[11px] font-semibold py-1.5 px-2 rounded-lg border text-center transition-all hover:scale-105 ${d.roleColor}`}
-                  title={`Click to fill ${d.user}`}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-            <div className="text-[10px] text-stone-400 text-center mt-1.5">
-              Password is 'demo123' for all seeded accounts
-            </div>
-          </div>
+
 
           <div className="mt-5 text-center text-xs text-stone-500">
             {t("login.noAccount")}{" "}

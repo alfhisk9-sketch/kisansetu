@@ -26,13 +26,7 @@ export async function getRequestUser(req) {
 
     if (isProduction) {
       const supabase = getSupabaseAdmin();
-      if (!supabase) {
-        // Fallback to validated token payload if database is temporarily unreachable
-        if (tokenRole && resolvedUserId) {
-          return { id: resolvedUserId, role: tokenRole, display_name: "Authenticated User" };
-        }
-        return null;
-      }
+      if (!supabase) return null;
 
       const { data: userRow, error } = await supabase
         .from("users")
@@ -42,10 +36,6 @@ export async function getRequestUser(req) {
 
       if (!error && userRow) {
         return userRow;
-      }
-
-      if (tokenRole && resolvedUserId) {
-        return { id: resolvedUserId, role: tokenRole, display_name: "Authenticated User" };
       }
       return null;
     }
