@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../i18n/LocaleContext";
 import { api } from "../lib/api";
@@ -51,7 +52,8 @@ export default function Marketplace() {
 
   async function postDemand(e: React.FormEvent) {
     e.preventDefault();
-    await api.post("/buyers/demands", { ...demandForm, buyerId: profile?.id });
+    const buyerId = profile?.roleProfile?.id || user?.id;
+    await api.post("/buyers/demands", { ...demandForm, buyerId });
     setShowDemandModal(false);
     api.get("/buyers/demands/all?status=Open").then(setDemands);
   }
@@ -59,9 +61,10 @@ export default function Marketplace() {
   async function submitOffer(e: React.FormEvent) {
     e.preventDefault();
     if (!offerModalLot) return;
+    const buyerId = profile?.roleProfile?.id || user?.id;
     await api.post("/offers", { 
       lotId: offerModalLot.id, 
-      buyerId: profile?.id, 
+      buyerId, 
       ...offerForm 
     });
     setOfferModalLot(null);
@@ -199,28 +202,29 @@ export default function Marketplace() {
                     </div>
                   </div>
 
-                  <div className="pt-2 flex items-center justify-between border-t border-stone-100">
+                  <div className="pt-2 flex items-center justify-between border-t border-stone-100 gap-2">
                     <span className="text-[11px] text-stone-400 capitalize">{l.owner_type || "Farmer"} lot</span>
-                    {user?.role === "buyer" ? (
-                      <button 
-                        onClick={() => {
-                          setOfferModalLot(l);
-                          setOfferForm({
-                            offerPrice: l.expected_price,
-                            quantityQuintals: l.quantity_quintals,
-                            deliveryDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
-                            paymentTerms: "Within 48 hours of delivery & weighment"
-                          });
-                        }}
-                        className="btn-primary text-xs py-1.5 px-3.5"
-                      >
-                        <HandCoins size={14} /> Make Offer
-                      </button>
-                    ) : (
-                      <a href={`/lots/${l.id}`} className="btn-secondary text-xs py-1.5 px-3">
+                    <div className="flex items-center gap-2">
+                      <Link to={`/lots/${l.id}`} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1">
                         View Details <ArrowRight size={13} />
-                      </a>
-                    )}
+                      </Link>
+                      {user?.role === "buyer" && (
+                        <button 
+                          onClick={() => {
+                            setOfferModalLot(l);
+                            setOfferForm({
+                              offerPrice: l.expected_price,
+                              quantityQuintals: l.quantity_quintals,
+                              deliveryDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+                              paymentTerms: "Within 48 hours of delivery & weighment"
+                            });
+                          }}
+                          className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
+                        >
+                          <HandCoins size={14} /> Make Offer
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

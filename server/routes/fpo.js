@@ -5,14 +5,22 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 
 const router = Router();
 
-router.get("/:id", async (req, res) => {
+function useSupabase() {
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-  const supabase = getSupabaseAdmin();
+  const hasSupabaseConfig = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return isProduction || hasSupabaseConfig;
+}
 
-  if (isProduction) {
+router.get("/:id", async (req, res) => {
+  if (useSupabase()) {
+    const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Database unavailable" });
     try {
-      const { data, error } = await supabase.from("fpos").select("*").eq("id", req.params.id).maybeSingle();
+      const { data, error } = await supabase
+        .from("fpos")
+        .select("*")
+        .or(`id.eq.${req.params.id},user_id.eq.${req.params.id}`)
+        .maybeSingle();
       if (error) return res.status(500).json({ error: error.message });
       if (!data) return res.status(404).json({ error: "FPO not found" });
       return res.json(data);
@@ -21,20 +29,22 @@ router.get("/:id", async (req, res) => {
     }
   }
 
-  const fpo = db.prepare(`SELECT * FROM fpos WHERE id = ?`).get(req.params.id);
+  const fpo = db.prepare(`SELECT * FROM fpos WHERE id = ? OR user_id = ?`).get(req.params.id, req.params.id);
   if (!fpo) return res.status(404).json({ error: "FPO not found" });
   res.json(fpo);
 });
 
 // MODULE 13: FPO Aggregation summary — individual farmer supply rolled up
 router.get("/:id/aggregation", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-  const supabase = getSupabaseAdmin();
-
-  if (isProduction) {
+  if (useSupabase()) {
+    const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Database unavailable" });
     try {
-      const { data: fpo } = await supabase.from("fpos").select("*").eq("id", req.params.id).maybeSingle();
+      const { data: fpo } = await supabase
+        .from("fpos")
+        .select("*")
+        .or(`id.eq.${req.params.id},user_id.eq.${req.params.id}`)
+        .maybeSingle();
       if (!fpo) return res.status(404).json({ error: "FPO not found" });
 
       const { data: farmers } = await supabase.from("farmers").select("*").eq("fpo_id", fpo.id);

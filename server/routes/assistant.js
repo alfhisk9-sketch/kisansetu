@@ -22,6 +22,13 @@ const CROP_SYNONYMS = {
   "పత్తి": { id: "crop-cotton", name: "Cotton" },
   "kapoos": { id: "crop-cotton", name: "Cotton" },
   "कापूस": { id: "crop-cotton", name: "Cotton" },
+  "कापसाचा": { id: "crop-cotton", name: "Cotton" },
+  "कापसाचे": { id: "crop-cotton", name: "Cotton" },
+  "कापसाची": { id: "crop-cotton", name: "Cotton" },
+  "कापसाला": { id: "crop-cotton", name: "Cotton" },
+  "कापसात": { id: "crop-cotton", name: "Cotton" },
+  "कापसावर": { id: "crop-cotton", name: "Cotton" },
+  "कापसाने": { id: "crop-cotton", name: "Cotton" },
 
   // Onion
   "onion": { id: "crop-onion", name: "Onion" },
@@ -514,10 +521,12 @@ You can view the interactive price trajectory chart under the Market Intelligenc
  * Production Grounded AI Assistant Endpoint
  */
 const askHandler = async (req, res) => {
-  const { question, cropId, district, userLat, userLng, userId, locale = "en" } = req.body;
-  if (!question || typeof question !== "string" || !question.trim()) {
+  const rawQ = req.body?.question || req.body?.message || req.body?.query;
+  if (!rawQ || typeof rawQ !== "string" || !rawQ.trim()) {
     return res.status(400).json({ error: "question is required" });
   }
+  const question = rawQ.trim();
+  const { cropId, district, userLat, userLng, userId, locale = "en" } = req.body || {};
 
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
   const lowerQ = question.toLowerCase();
@@ -721,8 +730,12 @@ const askHandler = async (req, res) => {
     lowerQ.includes("fictional") ||
     lowerQ.includes("unverified mandi")
   ) {
+    const unverifiedMsg = "I don't have verified current data for this market/crop in KisanSetu's records. As an authoritative market assistant, I only report verified government market records.";
     return res.json({
-      answer: "I don't have verified current data for this market/crop in KisanSetu's records. As an authoritative market assistant, I only report verified government market records.",
+      answer: unverifiedMsg,
+      reply: unverifiedMsg,
+      response: unverifiedMsg,
+      message: unverifiedMsg,
       source: "grounded-verifier",
       intent: "MARKET_QUERY"
     });
@@ -733,6 +746,9 @@ const askHandler = async (req, res) => {
     const answer = deterministicGroundedAnswer({ intent, question, grounding: groundingContext });
     return res.json({
       answer,
+      reply: answer,
+      response: answer,
+      message: answer,
       source: "grounded-deterministic",
       intent,
       configured: Boolean(process.env.GEMINI_API_KEY),
@@ -812,6 +828,9 @@ Include data source, date, and data status.`;
   const answer = deterministicGroundedAnswer({ intent, question, grounding: groundingContext });
   return res.json({
     answer,
+    reply: answer,
+    response: answer,
+    message: answer,
     source: "grounded-deterministic",
     intent,
     configured: hasGeminiKey,
@@ -825,7 +844,9 @@ Include data source, date, and data status.`;
   });
 };
 
+router.post("/", askHandler);
 router.post("/ask", askHandler);
 router.post("/chat", askHandler);
+router.post("/query", askHandler);
 
 export default router;

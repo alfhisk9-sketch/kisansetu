@@ -24,19 +24,29 @@ export default function Transactions() {
   const [txns, setTxns] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
 
+  const currentUserId = profile?.user?.id || user?.id;
+  const roleProfileId = profile?.roleProfile?.id || currentUserId;
+
   async function load() {
-    const qs = user?.role === "buyer" ? `buyerId=${profile?.id}` : `farmerOrFpoId=${profile?.id}`;
-    const data = await api.get(`/transactions?${qs}`);
-    setTxns(data);
-    if (data.length > 0 && !selected) {
+    if (!roleProfileId && !currentUserId) return;
+    const effectiveId = roleProfileId || currentUserId;
+    const qs = user?.role === "buyer" ? `buyerId=${effectiveId}` : `farmerOrFpoId=${effectiveId}`;
+    let data = await api.get(`/transactions?${qs}`);
+    if (Array.isArray(data) && data.length === 0 && currentUserId && currentUserId !== roleProfileId) {
+      const fallbackQs = user?.role === "buyer" ? `buyerId=${currentUserId}` : `farmerOrFpoId=${currentUserId}`;
+      const fallbackData = await api.get(`/transactions?${fallbackQs}`);
+      if (Array.isArray(fallbackData) && fallbackData.length > 0) data = fallbackData;
+    }
+    setTxns(data || []);
+    if (data && data.length > 0 && !selected) {
       openDetail(data[0].id);
     }
   }
 
   useEffect(() => { 
-    if (profile) load(); 
+    if (user) load(); 
     // eslint-disable-next-line
-  }, [profile]);
+  }, [user, profile]);
 
   async function openDetail(id: string) {
     const d = await api.get(`/transactions/${id}`);
@@ -69,7 +79,7 @@ export default function Transactions() {
         title={t("transactions.title")} 
         subtitle={t("transactions.subtitle")}
         actions={
-          <DataBadge type="LIVE" note="Audited trade contracts & milestone settlements" />
+          <DataBadge type="LATEST AVAILABLE" note="Audited trade contracts & milestone settlements" />
         }
       />
 

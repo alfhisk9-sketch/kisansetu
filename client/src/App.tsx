@@ -47,7 +47,7 @@ function AppRoutes() {
         <Route path="/market-intelligence" element={<Protected roles={["farmer", "fpo"]}><MarketIntelligence /></Protected>} />
         <Route path="/compare" element={<Protected roles={["farmer", "fpo"]}><MarketComparison /></Protected>} />
         <Route path="/lots" element={<Protected roles={["farmer", "fpo"]}><Lots /></Protected>} />
-        <Route path="/lots/:id" element={<Protected roles={["farmer", "fpo"]}><LotDetail /></Protected>} />
+        <Route path="/lots/:id" element={<Protected roles={["farmer", "fpo", "buyer"]}><LotDetail /></Protected>} />
         <Route path="/marketplace" element={<Protected roles={["farmer", "fpo", "buyer"]}><Marketplace /></Protected>} />
         <Route path="/fpo-aggregation" element={<Protected roles={["fpo"]}><FpoAggregation /></Protected>} />
         <Route path="/storage" element={<Protected roles={["farmer", "fpo"]}><Storage /></Protected>} />

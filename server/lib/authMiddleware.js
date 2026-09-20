@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "./supabase.js";
 import { isOfflineDev, getDb } from "../db.js";
+import { verifyToken } from "./security.js";
 
 /**
  * Extract authenticated user from request header (supports async Supabase query in production)
@@ -12,35 +13,37 @@ export async function getRequestUser(req) {
     let resolvedUserId = authHeader;
     let tokenRole = null;
 
-    // Decode token if prefixed with ks_
+    // Decode and verify token if prefixed with ks_
     if (typeof authHeader === "string" && authHeader.startsWith("ks_")) {
-      const payloadPart = authHeader.split(".")[0].replace("ks_", "");
-      const decoded = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf-8"));
-      if (decoded && decoded.userId) {
-        resolvedUserId = decoded.userId;
-        tokenRole = decoded.role;
+      const decoded = verifyToken(authHeader);
+      if (!decoded || !decoded.userId) {
+        return null;
       }
+      resolvedUserId = decoded.userId;
+      tokenRole = decoded.role;
     }
 
     const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+    const hasSupabaseConfig = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    if (isProduction) {
+    if (isProduction || hasSupabaseConfig) {
       const supabase = getSupabaseAdmin();
-      if (!supabase) return null;
+      if (supabase) {
+        const { data: userRow, error } = await supabase
+          .from("users")
+          .select("id, username, role, display_name")
+          .eq("id", resolvedUserId)
+          .maybeSingle();
 
-      const { data: userRow, error } = await supabase
-        .from("users")
-        .select("id, username, role, display_name")
-        .eq("id", resolvedUserId)
-        .maybeSingle();
-
-      if (!error && userRow) {
-        return userRow;
+        if (!error && userRow) {
+          return userRow;
+        }
       }
-      return null;
+      // In production, Supabase PostgreSQL is the strict source of truth
+      if (isProduction) return null;
     }
 
-    // SQLite mode
+    // SQLite mode (local/offline development only)
     const db = getDb();
     return db.prepare(`SELECT id, username, role, display_name FROM users WHERE id = ?`).get(resolvedUserId) || null;
   } catch (err) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLocale } from "../i18n/LocaleContext";
 import { UserCircle2 } from "lucide-react";
@@ -7,11 +7,25 @@ export default function Profile() {
   const { user, profile, updateProfile, changePassword } = useAuth();
   const { t } = useLocale();
 
+  const roleProf = profile?.roleProfile || profile;
   const [displayName, setDisplayName] = useState(user?.display_name || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [location, setLocation] = useState(user?.location || "");
-  const [village, setVillage] = useState(profile?.village || "");
-  const [district, setDistrict] = useState(profile?.district || "");
+  const [village, setVillage] = useState(roleProf?.village || "");
+  const [district, setDistrict] = useState(roleProf?.district || "");
+
+  useEffect(() => {
+    if (user) {
+      setDisplayName(user.display_name || "");
+      setPhone(user.phone || "");
+      setLocation(user.location || "");
+    }
+    const rp = profile?.roleProfile || profile;
+    if (rp) {
+      if (rp.village) setVillage(rp.village);
+      if (rp.district) setDistrict(rp.district);
+    }
+  }, [user, profile]);
 
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState("");

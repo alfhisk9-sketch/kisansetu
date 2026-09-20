@@ -31,22 +31,35 @@ export default function Grievances() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<any>({ transactionId: "", issueCategory: "Payment delay", description: "" });
 
+  const currentUserId = profile?.user?.id || user?.id;
+  const roleProfileId = profile?.roleProfile?.id || currentUserId;
+
   async function load() {
     if (user?.role === "admin") {
       setGrievances(await api.get("/grievances"));
     } else {
-      setGrievances(await api.get(`/grievances?raisedBy=${profile?.id}`));
-      const qs = user?.role === "buyer" ? `buyerId=${profile?.id}` : `farmerOrFpoId=${profile?.id}`;
+      if (!currentUserId) return;
+      setGrievances(await api.get(`/grievances?raisedBy=${currentUserId}`));
+      const qs = user?.role === "buyer" ? `buyerId=${roleProfileId}` : `farmerOrFpoId=${roleProfileId}`;
       setTxns(await api.get(`/transactions?${qs}`));
     }
   }
 
-  useEffect(() => { if (profile || user?.role === "admin") load(); /* eslint-disable-next-line */ }, [profile, user]);
+  useEffect(() => { if (user) load(); /* eslint-disable-next-line */ }, [user, profile]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await api.post("/grievances", { ...form, raisedBy: profile?.id });
+    if (!form.description?.trim()) {
+      alert("Description cannot be empty");
+      return;
+    }
+    if (!currentUserId) {
+      alert("User session not found");
+      return;
+    }
+    await api.post("/grievances", { ...form, description: form.description.trim(), raisedBy: currentUserId });
     setShowForm(false);
+    setForm({ transactionId: "", issueCategory: "Payment delay", description: "" });
     load();
   }
 

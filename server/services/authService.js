@@ -4,6 +4,23 @@ import { isOfflineDev, getDb } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
+ * Canonical user sanitizer - strictly removes password hashes and secrets
+ */
+export function sanitizeUser(user) {
+  if (!user) return null;
+  const {
+    password,
+    password_hash,
+    passwordHash,
+    salt,
+    credential,
+    credentials,
+    ...safeUser
+  } = user;
+  return safeUser;
+}
+
+/**
  * Fetch full user profile & role profile for a given user from Supabase or SQLite
  */
 export async function fetchUserProfile(userId, role = null, isProduction = null) {
@@ -38,7 +55,7 @@ export async function fetchUserProfile(userId, role = null, isProduction = null)
       roleProfile = data || null;
     }
 
-    return { user, roleProfile };
+    return { user: sanitizeUser(user), roleProfile };
   }
 
   // SQLite fallback
@@ -56,7 +73,7 @@ export async function fetchUserProfile(userId, role = null, isProduction = null)
   else if (role === "fpo") roleProfile = db.prepare(`SELECT * FROM fpos WHERE user_id = ?`).get(userId) || null;
   else if (role === "buyer") roleProfile = db.prepare(`SELECT * FROM buyers WHERE user_id = ?`).get(userId) || null;
 
-  return { user, roleProfile };
+  return { user: sanitizeUser(user), roleProfile };
 }
 
 /**

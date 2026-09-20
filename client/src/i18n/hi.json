@@ -418,5 +418,11 @@
   "profile.saveChanges": "बदलाव सहेजें",
   "profile.changePassword": "पासवर्ड बदलें",
   "profile.currentPassword": "वर्तमान पासवर्ड",
-  "profile.passwordChangedNote": "पासवर्ड बदल गया। अगली बार साइन इन करते समय अपना नया पासवर्ड उपयोग करें।"
+  "profile.passwordChangedNote": "पासवर्ड बदल गया। अगली बार साइन इन करते समय अपना नया पासवर्ड उपयोग करें।",
+  "common.fields.market": "मंडी / बाजार",
+  "common.fields.qualityGrade": "गुणवत्ता श्रेणी",
+  "forecast.horizonLabel": "पूर्वानुमान अवधि (दिन)",
+  "forecast.runButton": "भाव का पूर्वानुमान लगाएं",
+  "lots.noLotsYet": "अभी तक कोई लॉट दर्ज नहीं किया गया है",
+  "lots.viewDetail": "विवरण देखें"
 }

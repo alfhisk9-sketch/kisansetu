@@ -6,25 +6,41 @@ import { SectionHeading, EmptyState, StatusBadge, DemoTag, StatCard } from "../c
 import { Users, Package, Layers } from "lucide-react";
 
 export default function FpoAggregation() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { t } = useLocale();
   const [data, setData] = useState<any>(null);
   const [crops, setCrops] = useState<any[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [form, setForm] = useState<any>({ cropId: "", grade: "A", location: "", district: "Guntur", expectedPrice: "", minAcceptablePrice: "", harvestDate: "", availableFrom: "" });
   const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fpoId = profile?.roleProfile?.id || profile?.user?.id || user?.id;
 
   async function load() {
-    if (!profile?.id) return;
-    const d = await api.get(`/fpo/${profile.id}/aggregation`);
-    setData(d);
+    if (!fpoId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const d = await api.get(`/fpo/${fpoId}/aggregation`);
+      setData(d);
+    } catch (err: any) {
+      console.error("Failed to load FPO aggregation:", err);
+      setError(err.message || "Failed to load FPO aggregation data");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    api.get("/crops").then(setCrops);
+    api.get("/crops").then(setCrops).catch(() => {});
     load();
     // eslint-disable-next-line
-  }, [profile]);
+  }, [fpoId]);
 
   function toggleLot(id: string) {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -32,20 +48,46 @@ export default function FpoAggregation() {
 
   async function createAggregate(e: React.FormEvent) {
     e.preventDefault();
-    if (selected.length === 0) return;
-    await api.post(`/fpo/${profile.id}/aggregate-lot`, { sourceLotIds: selected, ...form });
-    setSelected([]);
-    setShowForm(false);
-    load();
+    if (selected.length === 0 || !fpoId) return;
+    try {
+      await api.post(`/fpo/${fpoId}/aggregate-lot`, { sourceLotIds: selected, ...form });
+      setSelected([]);
+      setShowForm(false);
+      load();
+    } catch (err: any) {
+      alert(err.message || "Failed to create aggregated lot");
+    }
   }
 
-  if (!data) return <div className="text-sm text-stone-400">{t("common.loading")}</div>;
+  if (loading) return <div className="text-sm text-stone-400 p-8 text-center">{t("common.loading")}</div>;
 
-  const openLots = data.individualLots.filter((l: any) => l.status === "Open for offers");
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-sm text-red-600 mb-3">{error}</p>
+        <button onClick={load} className="btn-primary text-xs">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!data || !data.fpo) {
+    return (
+      <div className="p-8 text-center">
+        <EmptyState message="No FPO aggregation data found for this account." />
+        <button onClick={load} className="btn-secondary text-xs mt-3">
+          Refresh
+        </button>
+      </div>
+    );
+  }
+
+  const openLots = (data.individualLots || []).filter((l: any) => l.status === "Open for offers");
 
   return (
     <div>
-      <SectionHeading title={t("fpo.title")} subtitle={t("fpo.subtitle", { name: data.fpo.name })} />
+      <SectionHeading title={t("fpo.title")} subtitle={t("fpo.subtitle", { name: data.fpo?.name || "FPO Collective" })} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
         <StatCard label={t("fpo.memberFarmers")} value={data.memberFarmerCount} icon={<Users size={20} />} />

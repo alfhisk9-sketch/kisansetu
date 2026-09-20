@@ -418,5 +418,11 @@
   "profile.saveChanges": "बदल जतन करा",
   "profile.changePassword": "पासवर्ड बदला",
   "profile.currentPassword": "सध्याचा पासवर्ड",
-  "profile.passwordChangedNote": "पासवर्ड बदलला. पुढच्या वेळी साइन इन करताना नवीन पासवर्ड वापरा."
+  "profile.passwordChangedNote": "पासवर्ड बदलला. पुढच्या वेळी साइन इन करताना नवीन पासवर्ड वापरा.",
+  "common.fields.market": "बाजार / कृषी उत्पन्न बाजार समिती",
+  "common.fields.qualityGrade": "गुणवत्ता श्रेणी",
+  "forecast.horizonLabel": "अंदाज कालावधी (दिवस)",
+  "forecast.runButton": "भावाचा अंदाज लावा",
+  "lots.noLotsYet": "अद्याप कोणताही लॉट जोडलेला नाही",
+  "lots.viewDetail": "तपशील पहा"
 }

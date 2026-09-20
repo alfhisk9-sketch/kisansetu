@@ -72,56 +72,84 @@ export default function AgriculturalMap({
 
   // Normalize items from items, markets, or storage props
   const normalizedItems: MapMarkerItem[] = useMemo(() => {
-    const list: MapMarkerItem[] = [
-      ...(items || []),
-      ...(markets || []).map((m: any) => {
-        const lat = m.latitude || m.lat || 16.3067;
-        const lng = m.longitude || m.lng || 80.4365;
-        const dist = parsedUserLocation
-          ? calculateDistanceKm(parsedUserLocation[0], parsedUserLocation[1], lat, lng)
-          : m.distanceKm;
+    function isValidCoord(lat: any, lng: any): boolean {
+      if (lat === null || lat === undefined || lng === null || lng === undefined) return false;
+      const nLat = Number(lat);
+      const nLng = Number(lng);
+      if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return false;
+      if (nLat < -90 || nLat > 90) return false;
+      if (nLng < -180 || nLng > 180) return false;
+      if (nLat === 0 && nLng === 0) return false;
+      return true;
+    }
 
-        return {
-          id: m.id || m.marketId,
-          name: m.name || m.marketName,
-          type: "mandi" as const,
-          district: m.district || "",
-          state: m.state || "AP",
-          lat,
-          lng,
-          priceText: m.price ? `₹${m.price}/q` : undefined,
-          minPrice: m.minPrice,
-          maxPrice: m.maxPrice,
-          capacityText: m.arrival_quantity ? `Arrival: ${m.arrival_quantity}q` : undefined,
-          source: m.source || "data.gov.in / AGMARKNET",
-          address: m.address,
-          pincode: m.pincode,
-          distanceKm: dist,
-        };
-      }),
-      ...(storage || []).map((s: any) => {
-        const lat = s.latitude || s.lat || 16.3067;
-        const lng = s.longitude || s.lng || 80.4365;
-        const dist = parsedUserLocation
-          ? calculateDistanceKm(parsedUserLocation[0], parsedUserLocation[1], lat, lng)
-          : s.distance_km;
+    const list: MapMarkerItem[] = [];
 
-        return {
-          id: s.id,
-          name: s.name,
-          type: "storage" as const,
-          district: s.district || s.location || "",
-          lat,
-          lng,
-          rateText: s.rate || `₹${s.cost_per_day_per_quintal || 2}/day/q`,
-          capacityText: s.capacity || `${s.available_capacity_quintals || 0}q space`,
-          source: s.source || (s.verified ? "WDRA Registry" : "SEEDED DEMO"),
-          address: s.address,
-          pincode: s.pincode,
-          distanceKm: dist,
-        };
-      }),
-    ];
+    // 1. Direct items
+    for (const it of (items || [])) {
+      if (isValidCoord(it.lat, it.lng)) {
+        list.push(it);
+      }
+    }
+
+    // 2. Markets
+    for (const m of (markets || [])) {
+      const lat = m.latitude !== undefined ? m.latitude : m.lat;
+      const lng = m.longitude !== undefined ? m.longitude : m.lng;
+      if (!isValidCoord(lat, lng)) continue;
+
+      const numLat = Number(lat);
+      const numLng = Number(lng);
+      const dist = parsedUserLocation
+        ? calculateDistanceKm(parsedUserLocation[0], parsedUserLocation[1], numLat, numLng)
+        : m.distanceKm;
+
+      list.push({
+        id: m.id || m.marketId,
+        name: m.name || m.marketName,
+        type: "mandi" as const,
+        district: m.district || "",
+        state: m.state || "AP",
+        lat: numLat,
+        lng: numLng,
+        priceText: m.price ? `₹${m.price}/q` : undefined,
+        minPrice: m.minPrice,
+        maxPrice: m.maxPrice,
+        capacityText: m.arrival_quantity ? `Arrival: ${m.arrival_quantity}q` : undefined,
+        source: m.source || "data.gov.in / AGMARKNET",
+        address: m.address,
+        pincode: m.pincode,
+        distanceKm: dist,
+      });
+    }
+
+    // 3. Storage
+    for (const s of (storage || [])) {
+      const lat = s.latitude !== undefined ? s.latitude : s.lat;
+      const lng = s.longitude !== undefined ? s.longitude : s.lng;
+      if (!isValidCoord(lat, lng)) continue;
+
+      const numLat = Number(lat);
+      const numLng = Number(lng);
+      const dist = parsedUserLocation
+        ? calculateDistanceKm(parsedUserLocation[0], parsedUserLocation[1], numLat, numLng)
+        : s.distance_km;
+
+      list.push({
+        id: s.id,
+        name: s.name,
+        type: "storage" as const,
+        district: s.district || s.location || "",
+        lat: numLat,
+        lng: numLng,
+        rateText: s.rate || `₹${s.cost_per_day_per_quintal || 2}/day/q`,
+        capacityText: s.capacity || `${s.available_capacity_quintals || 0}q space`,
+        source: s.source || (s.verified ? "WDRA Registry" : "SEEDED DEMO"),
+        address: s.address,
+        pincode: s.pincode,
+        distanceKm: dist,
+      });
+    }
 
     return list;
   }, [items, markets, storage, parsedUserLocation]);

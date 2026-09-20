@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { computeGrade, compareStoreVsSellNow, calcMarketCharges } from "../lib/algorithms.js";
 import { assertRequired } from "../lib/validate.js";
 import { AUTHORITATIVE_CROPS_CATALOG } from "../services/cropMasterService.js";
+import { getRequestUser } from "../lib/authMiddleware.js";
 
 const router = Router();
 
@@ -14,8 +15,25 @@ function useSupabase() {
   return isProduction || hasSupabaseConfig;
 }
 
+const recentLotSubmissions = new Map();
+const recentPayloadSignatures = new Map();
+function cleanupIdempotency() {
+  const now = Date.now();
+  for (const [k, v] of recentLotSubmissions.entries()) {
+    if (now - v.timestamp > 120000) {
+      recentLotSubmissions.delete(k);
+    }
+  }
+  for (const [k, v] of recentPayloadSignatures.entries()) {
+    if (now - v > 10000) {
+      recentPayloadSignatures.delete(k);
+    }
+  }
+}
+
 router.get("/", async (req, res) => {
   const { ownerId, ownerType, status } = req.query;
+  const crop = req.query.crop || req.query.cropId;
   const catalogMap = new Map(AUTHORITATIVE_CROPS_CATALOG.map(c => [c.crop_id, c.name]));
 
   if (useSupabase()) {
@@ -27,6 +45,7 @@ router.get("/", async (req, res) => {
       if (ownerId) q = q.eq("owner_id", ownerId);
       if (ownerType) q = q.eq("owner_type", ownerType);
       if (status) q = q.eq("status", status);
+      if (crop) q = q.eq("crop_id", crop);
 
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -47,6 +66,7 @@ router.get("/", async (req, res) => {
   if (ownerId) { query += ` AND l.owner_id = ?`; params.push(ownerId); }
   if (ownerType) { query += ` AND l.owner_type = ?`; params.push(ownerType); }
   if (status) { query += ` AND l.status = ?`; params.push(status); }
+  if (crop) { query += ` AND l.crop_id = ?`; params.push(crop); }
   query += ` ORDER BY l.created_at DESC`;
   const rows = db.prepare(query).all(...params);
   res.json(rows.map(r => ({ ...r, crop_name: r.crop_name || catalogMap.get(r.crop_id) || "Produce" })));
@@ -103,29 +123,123 @@ router.get("/:id", async (req, res) => {
   res.json({ ...lot, crop_name: lot.crop_name || catalogMap.get(lot.crop_id) || "Produce", grades, offers });
 });
 
+router.post("/:id/cancel", async (req, res) => {
+  const reqUser = await getRequestUser(req);
+  if (reqUser && reqUser.role === "buyer") {
+    return res.status(403).json({ error: "Access denied. Buyers cannot cancel farmer lots." });
+  }
+
+  const lotId = req.params.id;
+  if (useSupabase()) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    const { data: lot, error: lErr } = await supabase.from("lots").select("*").eq("id", lotId).maybeSingle();
+    if (lErr || !lot) return res.status(404).json({ error: "Lot not found" });
+
+    if (lot.status === "Withdrawn" || lot.status === "Cancelled") {
+      return res.json({ success: true, message: "Lot is already cancelled", lot: { ...lot, status: "Cancelled" }, status: "Cancelled" });
+    }
+
+    const { data: activeOffers } = await supabase.from("offers").select("id").eq("lot_id", lotId).eq("status", "Accepted");
+    if (activeOffers && activeOffers.length > 0) {
+      return res.status(400).json({ error: "Cannot cancel a lot with accepted offers or active contracts" });
+    }
+
+    const { data: updated, error: uErr } = await supabase
+      .from("lots")
+      .update({ status: "Withdrawn", updated_at: new Date().toISOString() })
+      .eq("id", lotId)
+      .select()
+      .single();
+
+    if (uErr) return res.status(500).json({ error: uErr.message });
+    return res.json({ success: true, message: "Lot cancelled successfully", lot: { ...updated, status: "Cancelled" }, status: "Cancelled" });
+  }
+
+  const db = getDb();
+  const lot = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
+  if (!lot) return res.status(404).json({ error: "Lot not found" });
+
+  const activeOffer = db.prepare(`SELECT id FROM offers WHERE lot_id = ? AND status = 'Accepted'`).get(lotId);
+  if (activeOffer) {
+    return res.status(400).json({ error: "Cannot cancel a lot with accepted offers or active contracts" });
+  }
+
+  db.prepare(`UPDATE lots SET status = 'Withdrawn' WHERE id = ?`).run(lotId);
+  const updated = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
+  return res.json({ success: true, message: "Lot cancelled successfully", lot: { ...updated, status: "Cancelled" }, status: "Cancelled" });
+});
+
 router.post("/", async (req, res) => {
   try {
     const b = req.body || {};
-    const ownerType = b.ownerType || b.owner_type || (b.farmer_id ? "farmer" : "farmer");
-    const ownerId = b.ownerId || b.owner_id || b.farmer_id;
-    const cropId = b.cropId || b.crop_id;
-    const quantityQuintals = Number(b.quantityQuintals !== undefined ? b.quantityQuintals : (b.quantity_quintals !== undefined ? b.quantity_quintals : b.quantity));
-    const location = b.location || b.village;
-    const district = b.district;
-
-    if (!ownerId || !cropId || !quantityQuintals || !location || !district) {
-      return res.status(400).json({
-        error: "Missing required lot fields. Required: ownerId (or farmer_id), cropId (or crop_id), quantityQuintals, location, district"
-      });
+    const idempotencyKey = req.headers["x-idempotency-key"] || b.idempotencyKey || b.clientRequestId;
+    cleanupIdempotency();
+    if (idempotencyKey && recentLotSubmissions.has(idempotencyKey)) {
+      const cached = recentLotSubmissions.get(idempotencyKey);
+      return res.status(200).json(cached.data);
     }
 
-    if (!cropId.startsWith("crop-")) {
-      return res.status(400).json({ error: `Invalid cropId '${cropId}'. Must be a canonical crop ID (e.g. crop-cotton)` });
+    const reqUser = await getRequestUser(req);
+    if (!reqUser) {
+      return res.status(401).json({ error: "Authentication required to create a produce lot" });
     }
+
+    const ownerType = b.ownerType || b.owner_type || (reqUser.role === "fpo" ? "fpo" : "farmer");
+    const ownerId = b.ownerId || b.owner_id || b.farmerId || b.farmer_id || reqUser.id;
+    let cropId = b.cropId || b.crop_id;
+    if (cropId && typeof cropId === "string") {
+      if (cropId.startsWith("crop_")) cropId = cropId.replace("crop_", "crop-");
+      else if (!cropId.startsWith("crop-")) cropId = `crop-${cropId.toLowerCase()}`;
+    }
+    const location = b.location || b.village || "Guntur";
+    const district = b.district || "Guntur";
+
+    if (!ownerId || typeof ownerId !== "string" || !ownerId.trim()) {
+      return res.status(400).json({ error: "Missing required lot field: ownerId" });
+    }
+    if (!cropId || typeof cropId !== "string" || !cropId.trim()) {
+      return res.status(400).json({ error: "Missing required lot field: cropId" });
+    }
+    if (!location || typeof location !== "string" || !location.trim()) {
+      return res.status(400).json({ error: "Missing required lot field: location" });
+    }
+    if (!district || typeof district !== "string" || !district.trim()) {
+      return res.status(400).json({ error: "Missing required lot field: district" });
+    }
+
+    const rawQty = b.quantityQuintals !== undefined ? b.quantityQuintals : (b.quantity_quintals !== undefined ? b.quantity_quintals : b.quantity);
+    if (rawQty === undefined || rawQty === null || rawQty === "") {
+      return res.status(400).json({ error: "quantityQuintals is required" });
+    }
+    const quantityQuintals = typeof rawQty === "string" && isNaN(Number(rawQty)) ? NaN : Number(rawQty);
+    if (!Number.isFinite(quantityQuintals) || quantityQuintals <= 0) {
+      return res.status(400).json({ error: "quantityQuintals must be a valid positive number greater than 0" });
+    }
+
+    const rawPrice = b.expectedPrice !== undefined ? b.expectedPrice : (b.expected_price !== undefined ? b.expected_price : (b.expected_price_quintal !== undefined ? b.expected_price_quintal : b.price));
+    if (rawPrice === undefined || rawPrice === null || rawPrice === "") {
+      return res.status(400).json({ error: "expectedPrice is required" });
+    }
+    const expectedPrice = typeof rawPrice === "string" && isNaN(Number(rawPrice)) ? NaN : Number(rawPrice);
+    if (!Number.isFinite(expectedPrice) || expectedPrice <= 0) {
+      return res.status(400).json({ error: "expectedPrice must be a valid positive number greater than 0" });
+    }
+
+    const payloadSig = `${ownerId}:${cropId}:${quantityQuintals}:${expectedPrice}:${b.variety || ""}`;
+    if (!idempotencyKey && recentPayloadSignatures.has(payloadSig)) {
+      const lastTime = recentPayloadSignatures.get(payloadSig);
+      if (Date.now() - lastTime < 3000) {
+        return res.status(409).json({ error: "Duplicate submission detected. An identical lot was just published." });
+      }
+    }
+    recentPayloadSignatures.set(payloadSig, Date.now());
 
     const catalogItem = AUTHORITATIVE_CROPS_CATALOG.find(c => c.crop_id === cropId);
     const lotId = b.id || `LOT-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
 
+    let responsePayload = null;
     if (useSupabase()) {
       const supabase = getSupabaseAdmin();
       if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
@@ -144,8 +258,8 @@ router.post("/", async (req, res) => {
           district: district,
           harvest_date: b.harvestDate || b.harvest_date || null,
           available_from: b.availableFrom || b.available_from || null,
-          expected_price: Number(b.expectedPrice || b.expected_price || 0),
-          min_acceptable_price: b.minAcceptablePrice !== undefined ? Number(b.minAcceptablePrice) : (b.min_acceptable_price !== undefined ? Number(b.min_acceptable_price) : null),
+          expected_price: expectedPrice,
+          min_acceptable_price: b.minAcceptablePrice !== undefined && b.minAcceptablePrice !== "" ? Number(b.minAcceptablePrice) : null,
           storage_available: Boolean(b.storageAvailable !== undefined ? b.storageAvailable : b.storage_available),
           status: "Open for offers",
           created_at: new Date().toISOString()
@@ -157,23 +271,28 @@ router.post("/", async (req, res) => {
         console.error("[POST /api/lots supabase error]:", error);
         return res.status(500).json({ error: error.message });
       }
-      return res.status(201).json({
+      responsePayload = {
         ...data,
         crop_name: catalogItem?.name || "Produce"
-      });
+      };
+    } else {
+      const db = getDb();
+      db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        lotId, ownerType, ownerId, cropId, b.variety || null, quantityQuintals, b.grade || "A",
+        location, district, b.harvestDate || b.harvest_date || null, b.availableFrom || b.available_from || null,
+        expectedPrice,
+        b.minAcceptablePrice !== undefined && b.minAcceptablePrice !== "" ? Number(b.minAcceptablePrice) : null,
+        b.storageAvailable ? 1 : 0, "Open for offers"
+      );
+      const row = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
+      responsePayload = { ...row, crop_name: catalogItem?.name || "Produce" };
     }
 
-    const db = getDb();
-    db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      lotId, ownerType, ownerId, cropId, b.variety || null, quantityQuintals, b.grade || "A",
-      location, district, b.harvestDate || b.harvest_date || null, b.availableFrom || b.available_from || null,
-      Number(b.expectedPrice || b.expected_price || 0),
-      b.minAcceptablePrice ? Number(b.minAcceptablePrice) : null,
-      b.storageAvailable ? 1 : 0, "Open for offers"
-    );
-    const row = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
-    return res.status(201).json({ ...row, crop_name: catalogItem?.name || "Produce" });
+    if (idempotencyKey) {
+      recentLotSubmissions.set(idempotencyKey, { timestamp: Date.now(), data: responsePayload });
+    }
+    return res.status(201).json({ ...responsePayload, lot: responsePayload, id: responsePayload.id });
   } catch (err) {
     console.error("[POST /api/lots unhandled error]:", err);
     return res.status(500).json({ error: err.message || "Failed to create produce lot" });
@@ -181,6 +300,11 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
+  const reqUser = await getRequestUser(req);
+  if (reqUser && reqUser.role === "buyer") {
+    return res.status(403).json({ error: "Access denied. Buyers cannot modify farmer lots." });
+  }
+
   const b = req.body || {};
 
   if (useSupabase()) {
@@ -234,9 +358,10 @@ router.put("/:id", async (req, res) => {
   const loc = b.location !== undefined ? b.location : existing.location;
   const dist = b.district !== undefined ? b.district : existing.district;
   const price = b.expectedPrice !== undefined ? Number(b.expectedPrice) : existing.expected_price;
+  const status = b.status !== undefined ? b.status : existing.status;
 
-  db.prepare(`UPDATE lots SET crop_id = ?, variety = ?, quantity_quintals = ?, grade = ?, location = ?, district = ?, expected_price = ? WHERE id = ?`)
-    .run(cropId, variety, qty, grade, loc, dist, price, req.params.id);
+  db.prepare(`UPDATE lots SET crop_id = ?, variety = ?, quantity_quintals = ?, grade = ?, location = ?, district = ?, expected_price = ?, status = ? WHERE id = ?`)
+    .run(cropId, variety, qty, grade, loc, dist, price, status, req.params.id);
 
   const updated = db.prepare(`SELECT l.*, c.name as crop_name FROM lots l JOIN crops c ON c.id = l.crop_id WHERE l.id = ?`).get(req.params.id);
   res.json(updated);
@@ -273,6 +398,11 @@ router.patch("/:id/status", async (req, res) => {
 });
 
 router.post("/:id/grade", async (req, res) => {
+  const reqUser = await getRequestUser(req);
+  if (reqUser && reqUser.role === "buyer") {
+    return res.status(403).json({ error: "Access denied. Buyers cannot grade farmer lots." });
+  }
+
   if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });

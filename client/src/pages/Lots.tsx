@@ -60,11 +60,16 @@ export default function Lots() {
   }
 
   async function load() {
-    const ownerId = profile?.id || user?.id;
+    const ownerId = profile?.roleProfile?.id || profile?.user?.id || user?.id;
+    const currentUserId = profile?.user?.id || user?.id;
     const ownerType = user?.role === "fpo" ? "fpo" : "farmer";
     if (!ownerId) return;
     try {
-      const data = await api.get(`/lots?ownerId=${ownerId}&ownerType=${ownerType}`);
+      let data = await api.get(`/lots?ownerId=${ownerId}&ownerType=${ownerType}`);
+      if (Array.isArray(data) && data.length === 0 && currentUserId && currentUserId !== ownerId) {
+        const fallback = await api.get(`/lots?ownerId=${currentUserId}&ownerType=${ownerType}`);
+        if (Array.isArray(fallback) && fallback.length > 0) data = fallback;
+      }
       setLots(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.warn("Failed to load lots:", err.message);
@@ -76,28 +81,46 @@ export default function Lots() {
   }, []);
 
   useEffect(() => {
-    if (profile?.id || user?.id) {
+    if (user) {
       load();
     }
-  }, [profile?.id, user?.id, user?.role]);
+  }, [user, profile]);
 
   async function createLot(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
     if (!form.cropId) {
       alert("Please select a valid crop before creating a lot.");
       return;
     }
+    const qty = Number(form.quantityQuintals);
+    if (isNaN(qty) || qty <= 0) {
+      alert("Please enter a valid positive quantity greater than zero.");
+      return;
+    }
+    const price = Number(form.expectedPrice);
+    if (isNaN(price) || price <= 0) {
+      alert("Please enter a valid expected price greater than zero.");
+      return;
+    }
+
     setSaving(true);
     try {
-      const ownerId = profile?.id || user?.id;
+      const ownerId = profile?.roleProfile?.id || profile?.user?.id || user?.id;
       const ownerType = user?.role === "fpo" ? "fpo" : "farmer";
+      const idempotencyKey = `idemp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
       await api.post("/lots", { 
         ...form, 
+        quantityQuintals: qty,
+        expectedPrice: price,
+        minAcceptablePrice: form.minAcceptablePrice ? Number(form.minAcceptablePrice) : undefined,
         crop_id: form.cropId,
         cropId: form.cropId,
         farmer_id: ownerId,
         ownerId, 
         ownerType,
+        idempotencyKey,
         quantity_unit: "quintal"
       });
       setShowWizard(false);

@@ -418,5 +418,11 @@
   "profile.saveChanges": "Save changes",
   "profile.changePassword": "Change password",
   "profile.currentPassword": "Current password",
-  "profile.passwordChangedNote": "Password changed. Use your new password next time you sign in."
+  "profile.passwordChangedNote": "Password changed. Use your new password next time you sign in.",
+  "common.fields.market": "Market / Mandi",
+  "common.fields.qualityGrade": "Quality Grade",
+  "forecast.horizonLabel": "Forecast Horizon (Days)",
+  "forecast.runButton": "Run Price Forecast",
+  "lots.noLotsYet": "No produce lots listed yet",
+  "lots.viewDetail": "View Details"
 }

@@ -418,5 +418,11 @@
   "profile.saveChanges": "మార్పులను సేవ్ చేయండి",
   "profile.changePassword": "పాస్‌వర్డ్ మార్చండి",
   "profile.currentPassword": "ప్రస్తుత పాస్‌వర్డ్",
-  "profile.passwordChangedNote": "పాస్‌వర్డ్ మార్చబడింది. తదుపరిసారి సైన్ ఇన్ చేసేటప్పుడు మీ కొత్త పాస్‌వర్డ్‌ను ఉపయోగించండి."
+  "profile.passwordChangedNote": "పాస్‌వర్డ్ మార్చబడింది. తదుపరిసారి సైన్ ఇన్ చేసేటప్పుడు మీ కొత్త పాస్‌వర్డ్‌ను ఉపయోగించండి.",
+  "common.fields.market": "మార్కెట్ / మార్కెట్ యార్డ్",
+  "common.fields.qualityGrade": "నాణ్యత గ్రేడ్",
+  "forecast.horizonLabel": "అంచనా కాలం (రోజులు)",
+  "forecast.runButton": "ధర అంచనా వేయండి",
+  "lots.noLotsYet": "ఇంకా ఏ లాట్‌లు నమోదు కాలేదు",
+  "lots.viewDetail": "వివరాలు చూడండి"
 }

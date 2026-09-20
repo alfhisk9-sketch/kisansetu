@@ -155,7 +155,7 @@ export default function Assistant() {
         subtitle="Grounded market assistant powered by Google Gemini and verified regional mandi data"
         actions={
           <div className="flex items-center gap-2">
-            <DataBadge type="LIVE" note="Grounded in platform database" />
+            <DataBadge type="LATEST AVAILABLE" note="Grounded in platform database" />
           </div>
         }
       />

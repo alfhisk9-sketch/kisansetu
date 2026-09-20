@@ -7,7 +7,8 @@ import { hashPassword, verifyPassword, generateToken } from "../lib/security.js"
 import {
   authenticateUser,
   registerUser,
-  fetchUserProfile
+  fetchUserProfile,
+  sanitizeUser
 } from "../services/authService.js";
 import { getRequestUser } from "../lib/authMiddleware.js";
 
@@ -152,8 +153,7 @@ router.patch("/profile", async (req, res) => {
     }
 
     const { data: updatedUser } = await supabase.from("users").select("*").eq("id", userId).single();
-    const { password_hash: _ph, ...safeUser } = updatedUser;
-    return res.json({ user: safeUser, profile });
+    return res.json({ user: sanitizeUser(updatedUser), profile });
   }
 
   // SQLite fallback
@@ -188,8 +188,7 @@ router.patch("/profile", async (req, res) => {
   }
 
   const updatedUser = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
-  const { password: _pw, ...safeUser } = updatedUser;
-  res.json({ user: safeUser, profile });
+  res.json({ user: sanitizeUser(updatedUser), profile });
 });
 
 /**
@@ -280,8 +279,7 @@ router.post("/sync-oauth", async (req, res) => {
     if (existingUser) {
       const profile = await fetchUserProfile(existingUser.id, existingUser.role, true);
       const token = generateToken(existingUser.id, existingUser.role);
-      const { password_hash: _ph, ...safeUser } = existingUser;
-      return res.json({ user: safeUser, profile, token, isNewUser: false });
+      return res.json({ user: sanitizeUser(existingUser), profile, token, isNewUser: false });
     }
 
     // 2. If new user and no role selected yet
@@ -356,8 +354,7 @@ router.post("/sync-oauth", async (req, res) => {
     }
 
     const token = generateToken(createdUser.id, createdUser.role);
-    const { password_hash: _ph, ...safeUser } = createdUser;
-    return res.status(201).json({ user: safeUser, profile, token, isNewUser: true });
+    return res.status(201).json({ user: sanitizeUser(createdUser), profile, token, isNewUser: true });
   }
 
   // SQLite fallback
@@ -374,8 +371,7 @@ router.post("/sync-oauth", async (req, res) => {
     if (user.role === "buyer") profile = db.prepare(`SELECT * FROM buyers WHERE user_id = ?`).get(user.id);
 
     const token = generateToken(user.id, user.role);
-    const { password: _pw, ...safeUser } = user;
-    return res.json({ user: safeUser, profile, token, isNewUser: false });
+    return res.json({ user: sanitizeUser(user), profile, token, isNewUser: false });
   }
 
   if (!role) {

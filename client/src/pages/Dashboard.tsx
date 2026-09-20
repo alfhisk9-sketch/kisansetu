@@ -37,15 +37,25 @@ export default function Dashboard() {
         const cropsData = await api.get("/crops");
         setCrops(cropsData);
 
+        const currentUserId = profile?.user?.id || user?.id;
+        const roleProfileId = profile?.roleProfile?.id || currentUserId;
+
         if (user?.role === "farmer" || user?.role === "fpo") {
-          const ownerId = profile?.id;
-          const lotsData = await api.get(`/lots?ownerId=${ownerId}&ownerType=${user.role}`);
-          setLots(lotsData);
+          let lotsData = await api.get(`/lots?ownerId=${roleProfileId}&ownerType=${user.role}`);
+          if (Array.isArray(lotsData) && lotsData.length === 0 && currentUserId && currentUserId !== roleProfileId) {
+            const fallbackLots = await api.get(`/lots?ownerId=${currentUserId}&ownerType=${user.role}`);
+            if (Array.isArray(fallbackLots) && fallbackLots.length > 0) lotsData = fallbackLots;
+          }
+          setLots(lotsData || []);
 
-          const txnsData = await api.get(`/transactions?farmerOrFpoId=${ownerId}`);
-          setTxns(txnsData);
+          let txnsData = await api.get(`/transactions?farmerOrFpoId=${roleProfileId}`);
+          if (Array.isArray(txnsData) && txnsData.length === 0 && currentUserId && currentUserId !== roleProfileId) {
+            const fallbackTxns = await api.get(`/transactions?farmerOrFpoId=${currentUserId}`);
+            if (Array.isArray(fallbackTxns) && fallbackTxns.length > 0) txnsData = fallbackTxns;
+          }
+          setTxns(txnsData || []);
 
-          if (lotsData.length > 0) {
+          if (lotsData && lotsData.length > 0) {
             const offersAll = await Promise.all(
               lotsData.slice(0, 5).map((l: any) => api.get(`/offers?lotId=${l.id}`))
             );
@@ -53,8 +63,8 @@ export default function Dashboard() {
           }
 
           // Fetch best market recommendation for user's primary crop
-          const primaryCrop = lotsData[0]?.crop_id || cropsData[0]?.id;
-          const userDistrict = profile?.district || user.location?.split(",")?.[1]?.trim() || "Guntur";
+          const primaryCrop = lotsData?.[0]?.crop_id || cropsData?.[0]?.id;
+          const userDistrict = profile?.roleProfile?.district || profile?.district || user.location?.split(",")?.[1]?.trim() || "Guntur";
           if (primaryCrop) {
             try {
               const comp = await api.get(`/markets/compare?cropId=${primaryCrop}&district=${userDistrict}&quantity=10&grade=A`);
@@ -69,10 +79,14 @@ export default function Dashboard() {
             }
           }
         } else if (user?.role === "buyer") {
-          const demandData = await api.get(`/buyers/${profile?.id}`);
-          setDemands(demandData.demands || []);
-          const txnsData = await api.get(`/transactions?buyerId=${profile?.id}`);
-          setTxns(txnsData);
+          try {
+            const demandData = await api.get(`/buyers/${roleProfileId}`);
+            setDemands(demandData.demands || []);
+          } catch (_) {
+            setDemands([]);
+          }
+          const txnsData = await api.get(`/transactions?buyerId=${roleProfileId}`);
+          setTxns(txnsData || []);
         }
       } catch (e) {
         console.error("Dashboard data load error:", e);
@@ -103,7 +117,7 @@ export default function Dashboard() {
             <span className="text-xs font-bold uppercase tracking-wider text-brand-700 bg-brand-50 px-2.5 py-0.5 rounded-full border border-brand-200/60">
               {t(ROLE_KEY[user.role] || "common.roles.farmer")}
             </span>
-            <DataBadge type="LIVE" note="Verified platform live state" />
+            <DataBadge type="LATEST AVAILABLE" note="Platform ledger state" />
           </div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-stone-900 mt-1">
             {t("dashboard.welcome", { name: user.display_name })}

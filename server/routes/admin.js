@@ -8,13 +8,17 @@ import { AUTHORITATIVE_CROPS_CATALOG } from "../services/cropMasterService.js";
 
 const router = Router();
 
+function useSupabase() {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const hasSupabaseConfig = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return isProduction || hasSupabaseConfig;
+}
+
 // Strict RBAC: All /api/admin/* endpoints require the 'admin' role
 router.use(requireRole(["admin"]));
 
-router.get("/summary", async (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
-
-  if (isProduction) {
+async function getAdminSummary(req, res) {
+  if (useSupabase()) {
     const supabase = getSupabaseAdmin();
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
 
@@ -115,7 +119,10 @@ router.get("/summary", async (req, res) => {
     activeLogistics,
     avgNetRealizationPerQuintal: avgNetRealization,
   });
-});
+}
+
+router.get("/summary", getAdminSummary);
+router.get("/overview", getAdminSummary);
 
 router.get("/charts", async (req, res) => {
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";

@@ -3,6 +3,7 @@ import { db } from "../db.js";
 import { nanoid } from "nanoid";
 import { assertRequired } from "../lib/validate.js";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { getRequestUser } from "../lib/authMiddleware.js";
 
 const router = Router();
 
@@ -46,10 +47,27 @@ router.get("/", async (req, res) => {
 
 // MODULE 8: Buyer submits a digital offer
 router.post("/", async (req, res) => {
-  if (!assertRequired(req, res, ["lotId", "buyerId", "offerPrice", "quantityQuintals"])) return;
-  const b = req.body;
+  const reqUser = await getRequestUser(req);
+  const lotId = req.body?.lotId || req.body?.lot_id;
+  const buyerId = req.body?.buyerId || req.body?.buyer_id || reqUser?.id;
+  const rawPrice = req.body?.offerPrice !== undefined ? req.body?.offerPrice : (req.body?.offer_price_quintal !== undefined ? req.body?.offer_price_quintal : req.body?.offer_price);
+  const rawQty = req.body?.quantityQuintals !== undefined ? req.body?.quantityQuintals : (req.body?.quantity_quintals !== undefined ? req.body?.quantity_quintals : req.body?.quantity);
 
-  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (!lotId) return res.status(400).json({ error: "lotId is required" });
+  if (!buyerId) return res.status(400).json({ error: "buyerId is required" });
+
+  const offerPrice = Number(rawPrice);
+  if (!Number.isFinite(offerPrice) || offerPrice <= 0) {
+    return res.status(400).json({ error: "offerPrice must be greater than 0" });
+  }
+  const quantityQuintals = Number(rawQty);
+  if (!Number.isFinite(quantityQuintals) || quantityQuintals <= 0) {
+    return res.status(400).json({ error: "quantityQuintals must be greater than 0" });
+  }
+
+  const b = { ...req.body, lotId, buyerId, offerPrice, quantityQuintals };
+
+  const isProduction = (process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true") || Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
   const supabase = getSupabaseAdmin();
 
   if (isProduction) {
@@ -58,8 +76,12 @@ router.post("/", async (req, res) => {
       const { data: lot } = await supabase.from("lots").select("id, owner_type, owner_id").eq("id", b.lotId).maybeSingle();
       if (!lot) return res.status(404).json({ error: `unknown lotId: ${b.lotId}` });
 
-      const { data: buyer } = await supabase.from("buyers").select("id, name").eq("id", b.buyerId).maybeSingle();
-      if (!buyer) return res.status(404).json({ error: `unknown buyerId: ${b.buyerId}` });
+      let { data: buyer } = await supabase.from("buyers").select("id, name").eq("id", b.buyerId).maybeSingle();
+      if (!buyer) {
+        const { data: bByUser } = await supabase.from("buyers").select("id, name").eq("user_id", b.buyerId).maybeSingle();
+        buyer = bByUser;
+      }
+      const canonicalBuyerId = buyer ? buyer.id : b.buyerId;
 
       const offerId = `OFR-${Math.floor(1000 + Math.random() * 8999)}`;
       const { data: created, error: insErr } = await supabase
@@ -67,7 +89,7 @@ router.post("/", async (req, res) => {
         .insert({
           id: offerId,
           lot_id: b.lotId,
-          buyer_id: b.buyerId,
+          buyer_id: canonicalBuyerId,
           offer_price: b.offerPrice,
           quantity_quintals: b.quantityQuintals,
           delivery_date: b.deliveryDate || null,
@@ -89,12 +111,12 @@ router.post("/", async (req, res) => {
         await supabase.from("notifications").insert({
           id: `notif-${nanoid(8)}`,
           user_id: owner.user_id,
-          message: `New offer received on ${b.lotId} from ${buyer.name || "a buyer"}.`,
-          read: 0,
+          message: `New offer received on ${b.lotId} from ${buyer?.name || "a buyer"}.`,
+          read: false,
         });
       }
 
-      return res.status(201).json(created);
+      return res.status(201).json({ ...created, id: created.id, offer: created });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -102,13 +124,13 @@ router.post("/", async (req, res) => {
 
   const lotExists = db.prepare(`SELECT 1 FROM lots WHERE id = ?`).get(b.lotId);
   if (!lotExists) return res.status(404).json({ error: `unknown lotId: ${b.lotId}` });
-  const buyerExists = db.prepare(`SELECT 1 FROM buyers WHERE id = ?`).get(b.buyerId);
-  if (!buyerExists) return res.status(404).json({ error: `unknown buyerId: ${b.buyerId}` });
+  const buyerRow = db.prepare(`SELECT * FROM buyers WHERE id = ? OR user_id = ?`).get(b.buyerId, b.buyerId);
+  const canonicalBuyerId = buyerRow ? buyerRow.id : b.buyerId;
 
   const offerId = `OFR-${Math.floor(1000 + Math.random() * 8999)}`;
   db.prepare(`INSERT INTO offers (id, lot_id, buyer_id, offer_price, quantity_quintals, delivery_date, payment_terms, expiry_date, status, counter_of)
     VALUES (?,?,?,?,?,?,?,?, 'Pending', ?)`).run(
-    offerId, b.lotId, b.buyerId, b.offerPrice, b.quantityQuintals, b.deliveryDate || null, b.paymentTerms || null, b.expiryDate || null, b.counterOf || null
+    offerId, b.lotId, canonicalBuyerId, b.offerPrice, b.quantityQuintals, b.deliveryDate || null, b.paymentTerms || null, b.expiryDate || null, b.counterOf || null
   );
   db.prepare(`UPDATE lots SET status = 'Under negotiation' WHERE id = ? AND status = 'Open for offers'`).run(b.lotId);
 
@@ -116,7 +138,7 @@ router.post("/", async (req, res) => {
   if (lot) {
     const ownerTable = lot.owner_type === "fpo" ? "fpos" : "farmers";
     const owner = db.prepare(`SELECT user_id FROM ${ownerTable} WHERE id = ?`).get(lot.owner_id);
-    const buyer = db.prepare(`SELECT name FROM buyers WHERE id = ?`).get(b.buyerId);
+    const buyer = db.prepare(`SELECT name FROM buyers WHERE id = ?`).get(canonicalBuyerId);
     if (owner && owner.user_id) {
       db.prepare(`INSERT INTO notifications (id, user_id, message, read) VALUES (?,?,?,0)`).run(
         `notif-${nanoid(8)}`,
@@ -126,11 +148,23 @@ router.post("/", async (req, res) => {
     }
   }
 
-  res.status(201).json(db.prepare(`SELECT * FROM offers WHERE id = ?`).get(offerId));
+  const inserted = db.prepare(`SELECT * FROM offers WHERE id = ?`).get(offerId);
+  return res.status(201).json({ ...inserted, id: inserted.id, offer: inserted });
 });
 
-// Farmer/FPO responds: accept / reject / counter
-router.patch("/:id/respond", async (req, res) => {
+// Accept shortcut endpoint
+router.post("/:id/accept", async (req, res) => {
+  req.body = { ...req.body, action: "accept" };
+  return respondHandler(req, res);
+});
+
+// Reject shortcut endpoint
+router.post("/:id/reject", async (req, res) => {
+  req.body = { ...req.body, action: "reject" };
+  return respondHandler(req, res);
+});
+
+const respondHandler = async (req, res) => {
   if (!assertRequired(req, res, ["action"])) return;
   const { action, counterPrice, counterQuantity, counterNote } = req.body;
   if (!["accept", "reject", "counter"].includes(action)) {
@@ -231,6 +265,8 @@ router.patch("/:id/respond", async (req, res) => {
   }
 
   res.status(400).json({ error: "action must be accept | reject | counter" });
-});
+};
+
+router.patch("/:id/respond", respondHandler);
 
 export default router;

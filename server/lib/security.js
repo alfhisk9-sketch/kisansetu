@@ -27,11 +27,31 @@ export function verifyPassword(password, storedPassword) {
   return password === storedPassword;
 }
 
+const SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "kisansetu_secure_token_secret_key_2026";
+
 /**
  * Generate a cryptographically random session token
  */
 export function generateToken(userId, role) {
   const payload = Buffer.from(JSON.stringify({ userId, role, ts: Date.now() })).toString("base64url");
-  const sig = crypto.randomBytes(24).toString("base64url");
-  return `ks_${payload}.${sig}`;
+  const hmac = crypto.createHmac("sha256", SECRET).update(payload).digest("base64url");
+  return `ks_${payload}.${hmac}`;
+}
+
+/**
+ * Verify session token and extract payload
+ */
+export function verifyToken(token) {
+  if (!token || typeof token !== "string" || !token.startsWith("ks_")) return null;
+  const raw = token.slice(3);
+  const parts = raw.split(".");
+  if (parts.length !== 2) return null;
+  const [payload, sig] = parts;
+  const expectedHmac = crypto.createHmac("sha256", SECRET).update(payload).digest("base64url");
+  if (sig !== expectedHmac) return null;
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
+  } catch {
+    return null;
+  }
 }

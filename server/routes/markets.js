@@ -55,15 +55,16 @@ router.get("/search", async (req, res) => {
     if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
     try {
       let query = supabase.from("markets").select("*", { count: "exact" });
-      if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,district.ilike.%${searchTerm}%,state.ilike.%${searchTerm}%`);
+      const cleanSearch = searchTerm.replace(/[^a-zA-Z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+      if (cleanSearch) {
+        query = query.or(`name.ilike.%${cleanSearch}%,district.ilike.%${cleanSearch}%,state.ilike.%${cleanSearch}%`);
       }
       if (state) query = query.ilike("state", `%${state.trim()}%`);
       if (district) query = query.ilike("district", `%${district.trim()}%`);
 
       query = query.range(offset, offset + numLimit - 1).order("name");
       const { data, count, error } = await query;
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) return res.json({ markets: [], total: 0, page: numPage, limit: numLimit });
       return res.json({
         markets: data || [],
         total: count || 0,
@@ -71,7 +72,7 @@ router.get("/search", async (req, res) => {
         limit: numLimit
       });
     } catch (err) {
-      return res.status(500).json({ error: err.message });
+      return res.json({ markets: [], total: 0, page: numPage, limit: numLimit });
     }
   }
 
@@ -105,7 +106,13 @@ router.get("/search", async (req, res) => {
  * Authoritative Nearest Mandi Engine using Haversine straight-line distance
  */
 router.get("/nearest", async (req, res) => {
-  const { lat, lng, cropId, state, district, limit = 5, radiusKm } = req.query;
+  const { lat, lng, state, district, limit = 5, radiusKm } = req.query;
+  const rawCrop = req.query.cropId || req.query.crop || req.query.crop_id;
+  let cropId = rawCrop;
+  if (cropId && typeof cropId === "string") {
+    if (cropId.startsWith("crop_")) cropId = cropId.replace("crop_", "crop-");
+    else if (!cropId.startsWith("crop-")) cropId = `crop-${cropId.toLowerCase()}`;
+  }
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
   let userLat = Number(lat);
@@ -190,6 +197,7 @@ router.get("/nearest", async (req, res) => {
     // Find latest price record for this market
     const mPrices = pricesList.filter((p) => p.market_id === m.id);
     const latest = mPrices[0] || {};
+    const hasPriceRecord = latest.modal_price != null;
 
     return {
       marketId: m.id,
@@ -202,20 +210,25 @@ router.get("/nearest", async (req, res) => {
       roadDistanceKm: null, // Strictly null unless explicit routing engine (OSRM) used
       address: m.address || `${m.name}, ${m.district}`,
       pincode: m.pincode || null,
-      commodity: latest.commodity || (cropId ? cropId.replace("crop-", "") : "General Produce"),
-      latestPrice: latest.modal_price != null ? Number(latest.modal_price) : null,
-      modalPrice: latest.modal_price != null ? Number(latest.modal_price) : null,
+      commodity: hasPriceRecord ? (latest.commodity || (cropId ? cropId.replace("crop-", "") : "General Produce")) : (cropId ? null : "General Produce"),
+      latestPrice: hasPriceRecord ? Number(latest.modal_price) : null,
+      modalPrice: hasPriceRecord ? Number(latest.modal_price) : null,
       minPrice: latest.min_price != null ? Number(latest.min_price) : null,
       maxPrice: latest.max_price != null ? Number(latest.max_price) : null,
       arrivalQuantity: latest.arrival_qty_quintals != null ? Number(latest.arrival_qty_quintals) : null,
       priceDate: latest.date || null,
-      dataStatus: latest.data_status || "LATEST AVAILABLE",
+      dataStatus: hasPriceRecord ? (latest.data_status || "LATEST AVAILABLE") : "UNAVAILABLE",
       source: latest.source || "Government of India / AGMARKNET",
       sourceUrl: latest.source_url || "https://agmarknet.gov.in",
       locationSource: m.location_source || "verified_apmc_directory",
       verificationStatus: m.status === "active" ? "VERIFIED" : (m.status || "VERIFIED")
     };
   });
+
+  // When a specific crop is queried, only return mandis that have verified price records for that crop
+  if (cropId) {
+    results = results.filter((m) => m.latestPrice != null);
+  }
 
   if (radiusKm && hasUserCoords) {
     const r = Number(radiusKm);
@@ -236,7 +249,8 @@ router.get("/nearest", async (req, res) => {
     totalMarketsEvaluated: marketsList.length,
     distanceMetric: "Haversine straight-line distance (km)",
     nearestMandis: sliced,
-    markets: sliced
+    markets: sliced,
+    mandis: sliced
   });
 });
 

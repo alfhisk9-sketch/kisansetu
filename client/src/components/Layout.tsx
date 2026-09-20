@@ -47,14 +47,43 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin", labelKey: "nav.adminDashboard", icon: <ShieldCheck size={19} />, roles: ["admin"] },
 ];
 
-// 5 primary farmer mobile navigation items
-const MOBILE_PRIMARY_TABS = [
-  { to: "/dashboard", label: "Home", icon: <LayoutDashboard size={20} /> },
-  { to: "/market-intelligence", label: "Markets", icon: <TrendingUp size={20} /> },
-  { to: "/lots", label: "Sell", icon: <PackagePlus size={20} /> },
-  { to: "/marketplace", label: "Offers", icon: <Store size={20} /> },
-  { to: "/assistant", label: "AI Saathi", icon: <Sparkles size={20} className="text-amber-500" /> },
-];
+function getMobileTabs(role?: string) {
+  if (role === "buyer") {
+    return [
+      { to: "/dashboard", label: "Home", icon: <LayoutDashboard size={20} /> },
+      { to: "/marketplace", label: "Market", icon: <Store size={20} /> },
+      { to: "/transactions", label: "Deals", icon: <Truck size={20} /> },
+      { to: "/grievances", label: "Disputes", icon: <AlertTriangle size={20} /> },
+      { to: "/assistant", label: "AI Saathi", icon: <Sparkles size={20} className="text-amber-500" /> },
+    ];
+  }
+  if (role === "fpo") {
+    return [
+      { to: "/dashboard", label: "Home", icon: <LayoutDashboard size={20} /> },
+      { to: "/market-intelligence", label: "Markets", icon: <TrendingUp size={20} /> },
+      { to: "/fpo-aggregation", label: "Aggregate", icon: <Users size={20} /> },
+      { to: "/transactions", label: "Deals", icon: <Truck size={20} /> },
+      { to: "/assistant", label: "AI Saathi", icon: <Sparkles size={20} className="text-amber-500" /> },
+    ];
+  }
+  if (role === "admin") {
+    return [
+      { to: "/dashboard", label: "Home", icon: <LayoutDashboard size={20} /> },
+      { to: "/admin", label: "Admin", icon: <ShieldCheck size={20} /> },
+      { to: "/grievances", label: "Disputes", icon: <AlertTriangle size={20} /> },
+      { to: "/transactions", label: "Ledger", icon: <Truck size={20} /> },
+      { to: "/assistant", label: "AI Saathi", icon: <Sparkles size={20} className="text-amber-500" /> },
+    ];
+  }
+  // Default Farmer:
+  return [
+    { to: "/dashboard", label: "Home", icon: <LayoutDashboard size={20} /> },
+    { to: "/market-intelligence", label: "Markets", icon: <TrendingUp size={20} /> },
+    { to: "/lots", label: "Sell", icon: <PackagePlus size={20} /> },
+    { to: "/marketplace", label: "Offers", icon: <Store size={20} /> },
+    { to: "/assistant", label: "AI Saathi", icon: <Sparkles size={20} className="text-amber-500" /> },
+  ];
+}
 
 function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   const { locale, setLocale, t } = useLocale();
@@ -361,9 +390,9 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </main>
 
-      {/* Mobile Bottom Navigation (5 Primary Farmer Tabs) */}
+      {/* Mobile Bottom Navigation (Role-aware tabs) */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-stone-200/80 flex justify-around items-center h-16 z-20 shadow-elevated">
-        {MOBILE_PRIMARY_TABS.map((tab) => {
+        {getMobileTabs(user?.role).map((tab) => {
           const isActive = location.pathname === tab.to;
           return (
             <NavLink
