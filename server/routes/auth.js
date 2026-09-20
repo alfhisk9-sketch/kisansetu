@@ -1,135 +1,192 @@
 import { Router } from "express";
 import { nanoid } from "nanoid";
-import { db } from "../db.js";
+import { isOfflineDev, getDb } from "../db.js";
+import { getSupabaseAdmin } from "../lib/supabase.js";
 import { assertRequired } from "../lib/validate.js";
 import { hashPassword, verifyPassword, generateToken } from "../lib/security.js";
+import {
+  authenticateUser,
+  registerUser,
+  syncDemoAccountsToSupabase,
+  fetchUserProfile,
+  DEMO_ACCOUNTS_METADATA
+} from "../services/authService.js";
+import { getRequestUser } from "../lib/authMiddleware.js";
 
 const router = Router();
 
-// Production-grade authentication with password hashing & session token support
-router.post("/login", (req, res) => {
+/**
+ * Production-grade authentication with Supabase Auth authority
+ */
+router.post("/login", async (req, res) => {
   if (!assertRequired(req, res, ["username", "password"])) return;
   const { username, password } = req.body;
 
-  // Support case-insensitive username lookup
-  const user = db.prepare(`SELECT * FROM users WHERE LOWER(username) = LOWER(?)`).get(username);
-  if (!user) return res.status(401).json({ error: "Invalid username or password" });
-
-  const isValid = verifyPassword(password, user.password);
-  if (!isValid) {
-    return res.status(401).json({ error: "Invalid username or password" });
-  }
-
-  // Automatic seamless security upgrade: if legacy plaintext was stored, hash it now
-  if (!user.password.includes(":")) {
-    try {
-      const secureHash = hashPassword(password);
-      db.prepare(`UPDATE users SET password = ? WHERE id = ?`).run(secureHash, user.id);
-    } catch (err) {
-      console.warn("Failed to upgrade password hash:", err.message);
-    }
-  }
-
-  let profile = null;
-  if (user.role === "farmer") profile = db.prepare(`SELECT * FROM farmers WHERE user_id = ?`).get(user.id);
-  if (user.role === "fpo") profile = db.prepare(`SELECT * FROM fpos WHERE user_id = ?`).get(user.id);
-  if (user.role === "buyer") profile = db.prepare(`SELECT * FROM buyers WHERE user_id = ?`).get(user.id);
-
-  const token = generateToken(user.id, user.role);
-  const { password: _pw, ...safeUser } = user;
-  res.json({ user: safeUser, profile, token });
-});
-
-// Self-registration with secure password hashing
-const REGISTERABLE_ROLES = ["farmer", "fpo", "buyer"];
-const BUYER_TYPES = ["Processor", "Wholesaler", "Retail chain", "Institutional buyer", "Exporter", "Digital trader"];
-
-router.post("/register", (req, res) => {
-  if (!assertRequired(req, res, ["username", "password", "confirmPassword", "role", "displayName", "phone", "location"])) return;
-  const { username, password, confirmPassword, role, displayName, phone, location } = req.body;
-
-  if (!REGISTERABLE_ROLES.includes(role)) {
-    return res.status(400).json({ error: "role must be one of: farmer, fpo, buyer" });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: "password must be at least 6 characters" });
-  }
-  if (password !== confirmPassword) {
-    return res.status(400).json({ error: "password and confirmation do not match" });
-  }
-  if (role === "buyer" && !BUYER_TYPES.includes(req.body.buyerType)) {
-    return res.status(400).json({ error: `buyerType must be one of: ${BUYER_TYPES.join(", ")}` });
-  }
-
-  const existing = db.prepare(`SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)`).get(username);
-  if (existing) {
-    return res.status(409).json({ error: "That username is already taken." });
-  }
-
-  const userId = `user-${nanoid(10)}`;
-  const securePassword = hashPassword(password);
-
-  const createAccount = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO users (id, username, password, role, display_name, phone, location) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(userId, username, securePassword, role, displayName, phone, location);
-
-    let profile = null;
-    if (role === "farmer") {
-      const farmerId = `farmer-${nanoid(10)}`;
-      db.prepare(
-        `INSERT INTO farmers (id, user_id, name, village, district, fpo_id, land_holding_acres, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(farmerId, userId, displayName, req.body.village || null, req.body.district || null, null, req.body.landHoldingAcres || null, phone);
-      profile = db.prepare(`SELECT * FROM farmers WHERE id = ?`).get(farmerId);
-    } else if (role === "fpo") {
-      const fpoId = `fpo-${nanoid(10)}`;
-      db.prepare(
-        `INSERT INTO fpos (id, user_id, name, district, registration_no, member_count, contact) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(fpoId, userId, displayName, req.body.district || null, req.body.registrationNo || null, req.body.memberCount || 0, phone);
-      profile = db.prepare(`SELECT * FROM fpos WHERE id = ?`).get(fpoId);
-    } else if (role === "buyer") {
-      const buyerId = `buyer-${nanoid(10)}`;
-      db.prepare(
-        `INSERT INTO buyers (id, user_id, name, buyer_type, location, verified, documents_verified, transactions_completed, payment_reliability_pct, response_rate_pct, contact)
-         VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?)`
-      ).run(buyerId, userId, displayName, req.body.buyerType, location, phone);
-      profile = db.prepare(`SELECT * FROM buyers WHERE id = ?`).get(buyerId);
-    }
-    return profile;
-  });
-
-  let profile;
   try {
-    profile = createAccount();
-  } catch (e) {
-    console.error("Registration failed:", e);
-    return res.status(500).json({ error: "Registration failed" });
+    const result = await authenticateUser({ username, password });
+    if (!result.success) {
+      return res.status(result.statusCode || 401).json({ error: result.error || "Invalid username or password" });
+    }
+    res.json({ user: result.user, profile: result.profile, token: result.token });
+  } catch (err) {
+    console.error("Login route error:", err);
+    res.status(500).json({ error: "Authentication service encountered an error. Please try again." });
   }
-
-  const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
-  const token = generateToken(userId, role);
-  const { password: _pw, ...safeUser } = user;
-  res.status(201).json({ user: safeUser, profile, token });
 });
 
+/**
+ * Self-registration with Supabase Auth user & profile persistence
+ */
+router.post("/register", async (req, res) => {
+  if (!assertRequired(req, res, ["username", "password", "confirmPassword", "role", "displayName", "phone", "location"])) return;
+
+  try {
+    const result = await registerUser(req.body);
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
+    }
+    res.status(result.statusCode || 201).json({ user: result.user, profile: result.profile, token: result.token });
+  } catch (err) {
+    console.error("Register route error:", err);
+    res.status(500).json({ error: "Registration service encountered an error. Please try again." });
+  }
+});
+
+/**
+ * List verified demo accounts
+ */
 router.get("/demo-accounts", (req, res) => {
   res.json({
-    note: "Demo credentials for reviewers and judges. Password is 'demo123' for all accounts.",
-    accounts: [
-      { role: "farmer", username: "shaik.rabbani", name: "Shaik Rabbani (Farmer)" },
-      { role: "farmer", username: "shaik.alfhi", name: "Shaik Alfhi (Farmer)" },
-      { role: "fpo", username: "koushik", name: "Koushik (FPO Lead)" },
-      { role: "buyer", username: "d.krishna", name: "D. Krishna (Verified Buyer)" },
-      { role: "buyer", username: "akshay", name: "Akshay (Digital Trader)" },
-      { role: "admin", username: "hemasri", name: "Hemasri (Platform Admin)" },
-    ],
+    note: "Demo credentials for reviewers and evaluators. Password is 'demo123' for all accounts.",
+    accounts: DEMO_ACCOUNTS_METADATA.map((d) => ({
+      role: d.role,
+      username: d.username,
+      name: `${d.name} (${d.roleTitle})`
+    }))
   });
 });
 
-router.patch("/profile", (req, res) => {
+/**
+ * Safe on-demand demo account provisioning endpoint
+ */
+router.post("/sync-demo", async (req, res) => {
+  try {
+    const result = await syncDemoAccountsToSupabase();
+    res.json(result);
+  } catch (err) {
+    console.error("Demo sync route error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/auth/profile
+ * Retrieves authenticated user profile & role profile
+ */
+router.get("/profile", async (req, res) => {
+  const reqUser = await getRequestUser(req);
+  if (!reqUser) {
+    return res.status(401).json({ error: "Unauthorized: valid session or token required" });
+  }
+
+  const profileData = await fetchUserProfile(reqUser.id);
+  if (!profileData || !profileData.user) {
+    return res.status(404).json({ error: "User profile not found" });
+  }
+
+  res.json({
+    user: profileData.user,
+    roleProfile: profileData.roleProfile,
+    profile: profileData.roleProfile,
+  });
+});
+
+router.get("/me", async (req, res) => {
+  const reqUser = await getRequestUser(req);
+  if (!reqUser) {
+    return res.status(401).json({ error: "Unauthorized: valid session or token required" });
+  }
+
+  const profileData = await fetchUserProfile(reqUser.id);
+  if (!profileData || !profileData.user) {
+    return res.status(404).json({ error: "User profile not found" });
+  }
+
+  res.json({
+    user: profileData.user,
+    roleProfile: profileData.roleProfile,
+    profile: profileData.roleProfile,
+  });
+});
+
+/**
+ * Update user profile
+ */
+router.patch("/profile", async (req, res) => {
   if (!assertRequired(req, res, ["userId"])) return;
   const { userId, displayName, phone, location } = req.body;
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    const { data: user, error: uErr } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (uErr || !user) return res.status(404).json({ error: "unknown userId" });
+
+    // Update user row
+    const userUpdates = { updated_at: new Date().toISOString() };
+    if (displayName) userUpdates.display_name = displayName;
+    if (phone) userUpdates.phone = phone;
+    if (location) userUpdates.location = location;
+
+    await supabase.from("users").update(userUpdates).eq("id", userId);
+
+    // Update role profile row
+    let profile = null;
+    if (user.role === "farmer") {
+      const fUpdates = {};
+      if (displayName) fUpdates.name = displayName;
+      if (phone) fUpdates.phone = phone;
+      if (req.body.village !== undefined) fUpdates.village = req.body.village;
+      if (req.body.district !== undefined) fUpdates.district = req.body.district;
+      if (req.body.landHoldingAcres !== undefined) fUpdates.land_holding_acres = Number(req.body.landHoldingAcres);
+
+      await supabase.from("farmers").update(fUpdates).eq("user_id", userId);
+      const { data: fData } = await supabase.from("farmers").select("*").eq("user_id", userId).maybeSingle();
+      profile = fData;
+    } else if (user.role === "fpo") {
+      const fpUpdates = {};
+      if (displayName) fpUpdates.name = displayName;
+      if (phone) fpUpdates.contact = phone;
+      if (req.body.district !== undefined) fpUpdates.district = req.body.district;
+
+      await supabase.from("fpos").update(fpUpdates).eq("user_id", userId);
+      const { data: fpData } = await supabase.from("fpos").select("*").eq("user_id", userId).maybeSingle();
+      profile = fpData;
+    } else if (user.role === "buyer") {
+      const bUpdates = {};
+      if (displayName) bUpdates.name = displayName;
+      if (phone) bUpdates.contact = phone;
+      if (location) bUpdates.location = location;
+
+      await supabase.from("buyers").update(bUpdates).eq("user_id", userId);
+      const { data: bData } = await supabase.from("buyers").select("*").eq("user_id", userId).maybeSingle();
+      profile = bData;
+    }
+
+    const { data: updatedUser } = await supabase.from("users").select("*").eq("id", userId).single();
+    const { password_hash: _ph, ...safeUser } = updatedUser;
+    return res.json({ user: safeUser, profile });
+  }
+
+  // SQLite fallback
+  const db = getDb();
   const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
   if (!user) return res.status(404).json({ error: "unknown userId" });
 
@@ -164,20 +221,62 @@ router.patch("/profile", (req, res) => {
   res.json({ user: safeUser, profile });
 });
 
-router.post("/change-password", (req, res) => {
+/**
+ * Change user password
+ */
+router.post("/change-password", async (req, res) => {
   if (!assertRequired(req, res, ["userId", "currentPassword", "newPassword", "confirmNewPassword"])) return;
   const { userId, currentPassword, newPassword, confirmNewPassword } = req.body;
 
-  const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
-  if (!user) return res.status(404).json({ error: "unknown userId" });
-  if (!verifyPassword(currentPassword, user.password)) {
-    return res.status(401).json({ error: "Current password is incorrect" });
-  }
   if (newPassword.length < 6) {
     return res.status(400).json({ error: "New password must be at least 6 characters" });
   }
   if (newPassword !== confirmNewPassword) {
     return res.status(400).json({ error: "New password and confirmation do not match" });
+  }
+
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    const { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
+    if (!user) return res.status(404).json({ error: "unknown userId" });
+
+    const email = user.username.includes("@") ? user.username : `${user.username}@kisansetu.in`;
+
+    const { createClient } = await import("@supabase/supabase-js");
+    const authClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+
+    const { error: verifyErr } = await authClient.auth.signInWithPassword({
+      email,
+      password: currentPassword
+    });
+
+    if (verifyErr) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    const { error: updateErr } = await supabase.auth.admin.updateUserById(userId, {
+      password: newPassword
+    });
+
+    if (updateErr) {
+      return res.status(500).json({ error: updateErr.message });
+    }
+
+    return res.json({ ok: true, message: "Password updated successfully" });
+  }
+
+  // SQLite fallback
+  const db = getDb();
+  const user = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId);
+  if (!user) return res.status(404).json({ error: "unknown userId" });
+  if (!verifyPassword(currentPassword, user.password)) {
+    return res.status(401).json({ error: "Current password is incorrect" });
   }
 
   const securePassword = hashPassword(newPassword);
@@ -186,19 +285,115 @@ router.post("/change-password", (req, res) => {
 });
 
 /**
- * PHASE 21-23: Google OAuth Synchronization with Supabase Auth
+ * Google OAuth Synchronization with Supabase Auth
  */
-router.post("/sync-oauth", (req, res) => {
+router.post("/sync-oauth", async (req, res) => {
   const { email, fullName, avatarUrl, supabaseUserId, role } = req.body;
   if (!email || !supabaseUserId) {
     return res.status(400).json({ error: "email and supabaseUserId are required" });
   }
 
-  // 1. Check if user already exists by supabase_user_id or username/email
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    // 1. Check if user already exists
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("*")
+      .or(`id.eq.${supabaseUserId},username.ilike.${email}`)
+      .maybeSingle();
+
+    if (existingUser) {
+      const profile = await fetchUserProfile(existingUser.id, existingUser.role, true);
+      const token = generateToken(existingUser.id, existingUser.role);
+      const { password_hash: _ph, ...safeUser } = existingUser;
+      return res.json({ user: safeUser, profile, token, isNewUser: false });
+    }
+
+    // 2. If new user and no role selected yet
+    if (!role) {
+      return res.json({
+        needsRoleSelection: true,
+        email,
+        fullName: fullName || email.split("@")[0],
+        supabaseUserId,
+        avatarUrl: avatarUrl || null,
+        allowedRoles: ["farmer", "buyer", "fpo"]
+      });
+    }
+
+    // 3. User is new and role selected (Strictly no admin self-selection)
+    if (!["farmer", "buyer", "fpo"].includes(role)) {
+      return res.status(400).json({ error: "Invalid role. Self-selection of Admin role is prohibited." });
+    }
+
+    const displayName = fullName || email.split("@")[0];
+
+    const { data: createdUser, error: insErr } = await supabase
+      .from("users")
+      .insert({
+        id: supabaseUserId,
+        username: email.toLowerCase(),
+        password_hash: "supabase_oauth_managed",
+        role,
+        display_name: displayName,
+        phone: "",
+        location: "Andhra Pradesh",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (insErr) {
+      return res.status(500).json({ error: `Failed to create user: ${insErr.message}` });
+    }
+
+    let profile = null;
+    if (role === "farmer") {
+      const farmerId = `farmer-${nanoid(8)}`;
+      const { data: fData } = await supabase.from("farmers").insert({
+        id: farmerId,
+        user_id: supabaseUserId,
+        name: displayName,
+        district: "Guntur"
+      }).select().single();
+      profile = fData;
+    } else if (role === "fpo") {
+      const fpoId = `fpo-${nanoid(8)}`;
+      const { data: fpData } = await supabase.from("fpos").insert({
+        id: fpoId,
+        user_id: supabaseUserId,
+        name: displayName,
+        district: "Guntur"
+      }).select().single();
+      profile = fpData;
+    } else if (role === "buyer") {
+      const buyerId = `buyer-${nanoid(8)}`;
+      const { data: bData } = await supabase.from("buyers").insert({
+        id: buyerId,
+        user_id: supabaseUserId,
+        name: displayName,
+        buyer_type: "Wholesaler",
+        location: "Andhra Pradesh",
+        verified: true
+      }).select().single();
+      profile = bData;
+    }
+
+    const token = generateToken(createdUser.id, createdUser.role);
+    const { password_hash: _ph, ...safeUser } = createdUser;
+    return res.status(201).json({ user: safeUser, profile, token, isNewUser: true });
+  }
+
+  // SQLite fallback
+  const db = getDb();
   let user = db.prepare(`SELECT * FROM users WHERE supabase_user_id = ? OR LOWER(username) = LOWER(?)`).get(supabaseUserId, email);
 
   if (user) {
-    // Update profile with newest OAuth metadata
     db.prepare(`UPDATE users SET supabase_user_id = ?, avatar_url = COALESCE(?, avatar_url), auth_provider = 'google' WHERE id = ?`)
       .run(supabaseUserId, avatarUrl || null, user.id);
 
@@ -212,7 +407,6 @@ router.post("/sync-oauth", (req, res) => {
     return res.json({ user: safeUser, profile, token, isNewUser: false });
   }
 
-  // 2. If user is new and no role provided yet -> return prompt for role selection
   if (!role) {
     return res.json({
       needsRoleSelection: true,
@@ -224,14 +418,13 @@ router.post("/sync-oauth", (req, res) => {
     });
   }
 
-  // 3. User is new and role provided -> validate role (Strictly no admin self-selection)
   if (!["farmer", "buyer", "fpo"].includes(role)) {
     return res.status(400).json({ error: "Invalid role. Self-selection of Admin role is prohibited." });
   }
 
   const newUserId = `user-${nanoid(10)}`;
   const displayName = fullName || email.split("@")[0];
-  const initialPasswordHash = hashPassword(nanoid(24)); // Random unguessable hash for OAuth user
+  const initialPasswordHash = hashPassword(nanoid(24));
 
   db.prepare(`
     INSERT INTO users (id, username, password, role, display_name, phone, location, auth_provider, supabase_user_id, avatar_url, created_at)

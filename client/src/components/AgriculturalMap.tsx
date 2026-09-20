@@ -220,7 +220,7 @@ export default function AgriculturalMap({
       userMarker.bindPopup(`
         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
           <div style="font-weight: bold; color: #17201B; font-size: 13px;">📍 Your Location</div>
-          <div style="color: #66736B; margin-top: 2px;">Used for calculating approximate straight-line road distance.</div>
+          <div style="color: #66736B; margin-top: 2px;">Used for calculating straight-line (Haversine) distance to markets.</div>
         </div>
       `);
     }
@@ -279,7 +279,7 @@ export default function AgriculturalMap({
 
           ${item.distanceKm != null ? `
             <div style="margin-top: 5px; font-size: 11px; color: #374151; font-weight: 600;">
-              Approx. distance: ${item.distanceKm} km
+              Straight-line distance: ${item.distanceKm} km
             </div>` : ""}
 
           ${item.source ? `

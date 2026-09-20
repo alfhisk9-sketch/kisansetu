@@ -1,13 +1,80 @@
 import { Router } from "express";
-import { db } from "../db.js";
-import { calcMarketCharges, calcNetRealization, calcTransportCost, estimateDistanceKm } from "../lib/algorithms.js";
-import { DISTRICT_DISTANCES } from "../data/distances.js";
+import { isOfflineDev, getDb } from "../db.js";
+import { getSupabaseAdmin } from "../lib/supabase.js";
+import { calcMarketCharges, calcNetRealization, calcTransportCost } from "../lib/algorithms.js";
 import { requireRole } from "../lib/authMiddleware.js";
 import { syncMarketData, getLatestSyncStatus } from "../services/marketDataService.js";
 
 const router = Router();
 
-router.get("/summary", (req, res) => {
+router.get("/summary", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    try {
+      const [
+        { count: registeredFarmers },
+        { count: activeFpos },
+        { count: verifiedBuyers },
+        { count: totalBuyers },
+        { count: activeLots },
+        { count: openOffers },
+        { count: openDisputes },
+        { count: delayedPayments },
+        { count: activeLogistics },
+        { data: txns },
+        { data: samplePrices }
+      ] = await Promise.all([
+        supabase.from("farmers").select("*", { count: "exact", head: true }),
+        supabase.from("fpos").select("*", { count: "exact", head: true }),
+        supabase.from("buyers").select("*", { count: "exact", head: true }).eq("verified", true),
+        supabase.from("buyers").select("*", { count: "exact", head: true }),
+        supabase.from("lots").select("*", { count: "exact", head: true }).in("status", ["Open for offers", "Under negotiation"]),
+        supabase.from("offers").select("*", { count: "exact", head: true }).eq("status", "Pending"),
+        supabase.from("grievances").select("*", { count: "exact", head: true }).not("status", "in", '("Resolved","Rejected")'),
+        supabase.from("payments").select("*", { count: "exact", head: true }).in("status", ["Delayed", "Pending"]),
+        supabase.from("logistics").select("*", { count: "exact", head: true }).in("status", ["Requested", "Assigned", "In Transit"]),
+        supabase.from("transactions").select("total_amount").eq("stage", "Payment Received"),
+        supabase.from("market_prices").select("modal_price").limit(10)
+      ]);
+
+      const completedTransactions = txns?.length || 0;
+      const completedTransactionsValue = (txns || []).reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0);
+
+      let netRealizations = [];
+      for (const p of samplePrices || []) {
+        const modal = Number(p.modal_price);
+        if (!modal) continue;
+        const marketCharges = calcMarketCharges(modal);
+        const transport = calcTransportCost({ distanceKm: 50, quantityQuintals: 20 });
+        netRealizations.push(calcNetRealization({ sellingPrice: modal, transportCost: transport, marketCharges }));
+      }
+      const avgNetRealization = netRealizations.length ? Math.round(netRealizations.reduce((a, b) => a + b, 0) / netRealizations.length) : 0;
+
+      return res.json({
+        registeredFarmers: registeredFarmers || 0,
+        activeFpos: activeFpos || 0,
+        verifiedBuyers: verifiedBuyers || 0,
+        totalBuyers: totalBuyers || 0,
+        activeLots: activeLots || 0,
+        openOffers: openOffers || 0,
+        completedTransactions,
+        completedTransactionsValue,
+        openDisputes: openDisputes || 0,
+        delayedPayments: delayedPayments || 0,
+        activeLogistics: activeLogistics || 0,
+        avgNetRealizationPerQuintal: avgNetRealization,
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // SQLite fallback
+  const db = getDb();
   const registeredFarmers = db.prepare(`SELECT COUNT(*) as n FROM farmers`).get().n;
   const activeFpos = db.prepare(`SELECT COUNT(*) as n FROM fpos`).get().n;
   const verifiedBuyers = db.prepare(`SELECT COUNT(*) as n FROM buyers WHERE verified = 1`).get().n;
@@ -19,7 +86,6 @@ router.get("/summary", (req, res) => {
   const delayedPayments = db.prepare(`SELECT COUNT(*) as n FROM payments WHERE status IN ('Delayed','Pending')`).get().n;
   const activeLogistics = db.prepare(`SELECT COUNT(*) as n FROM logistics WHERE status IN ('Requested','Assigned','In Transit')`).get().n;
 
-  // Average farmer net realization across a representative sample of current market prices
   const cropRows = db.prepare(`SELECT DISTINCT crop_id FROM market_prices`).all();
   let netRealizations = [];
   for (const { crop_id } of cropRows) {
@@ -47,20 +113,63 @@ router.get("/summary", (req, res) => {
   });
 });
 
-router.get("/charts", (req, res) => {
-  // 1. Average market price trend (last 14 days, across all crops, normalized index not needed — show onion as flagship)
+router.get("/charts", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    try {
+      const { data: prices } = await supabase
+        .from("market_prices")
+        .select("date, modal_price")
+        .eq("crop_id", "crop-onion")
+        .order("date", { ascending: true })
+        .limit(14);
+
+      const priceTrend = (prices || []).map((p) => ({ date: p.date, avg_price: Number(p.modal_price) }));
+
+      const { data: lots } = await supabase.from("lots").select("status");
+      const lotsMap = {};
+      for (const l of lots || []) {
+        lotsMap[l.status] = (lotsMap[l.status] || 0) + 1;
+      }
+      const lotsByStatus = Object.entries(lotsMap).map(([status, count]) => ({ status, count }));
+
+      const { data: demands } = await supabase.from("buyer_demands").select("crop_id, quantity_quintals").eq("status", "Open");
+      const demandMap = {};
+      for (const d of demands || []) {
+        demandMap[d.crop_id] = (demandMap[d.crop_id] || 0) + (Number(d.quantity_quintals) || 0);
+      }
+      const demandByCrop = Object.entries(demandMap).map(([crop, qty]) => ({ crop: crop.replace("crop-", ""), qty }));
+
+      const { data: txns } = await supabase.from("transactions").select("stage");
+      const txnMap = {};
+      for (const t of txns || []) {
+        txnMap[t.stage] = (txnMap[t.stage] || 0) + 1;
+      }
+      const txnByStage = Object.entries(txnMap).map(([stage, count]) => ({ stage, count }));
+
+      const { data: disputes } = await supabase.from("grievances").select("status");
+      const dispMap = {};
+      for (const g of disputes || []) {
+        dispMap[g.status] = (dispMap[g.status] || 0) + 1;
+      }
+      const disputesByStatus = Object.entries(dispMap).map(([status, count]) => ({ status, count }));
+
+      return res.json({ priceTrend, lotsByStatus, demandByCrop, txnByStage, disputesByStatus });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // SQLite fallback
+  const db = getDb();
   const priceTrend = db.prepare(`SELECT date, AVG(modal_price) as avg_price FROM market_prices WHERE crop_id = 'crop-onion' GROUP BY date ORDER BY date ASC`).all();
-
-  // 2. Active lots by status
   const lotsByStatus = db.prepare(`SELECT status, COUNT(*) as count FROM lots GROUP BY status`).all();
-
-  // 3. Buyer demand by crop
   const demandByCrop = db.prepare(`SELECT c.name as crop, SUM(bd.quantity_quintals) as qty FROM buyer_demands bd JOIN crops c ON c.id = bd.crop_id WHERE bd.status = 'Open' GROUP BY c.name`).all();
-
-  // 4. Transaction volume by stage
   const txnByStage = db.prepare(`SELECT stage, COUNT(*) as count FROM transactions GROUP BY stage`).all();
-
-  // 5. Dispute status breakdown
   const disputesByStatus = db.prepare(`SELECT status, COUNT(*) as count FROM grievances GROUP BY status`).all();
 
   res.json({ priceTrend, lotsByStatus, demandByCrop, txnByStage, disputesByStatus });
@@ -75,9 +184,9 @@ router.post("/market-data/sync", requireRole(["admin"]), async (req, res) => {
   }
 });
 
-router.get("/market-data/sync-status", (req, res) => {
+router.get("/market-data/sync-status", async (req, res) => {
   try {
-    const status = getLatestSyncStatus();
+    const status = await getLatestSyncStatus();
     res.json(status);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch sync status", detail: err.message });

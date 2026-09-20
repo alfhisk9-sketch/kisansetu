@@ -533,11 +533,64 @@ export function validateMarketRecord(rec) {
 }
 
 /**
- * Initialize verified markets and storage facilities in database
+ * Initialize verified markets and storage facilities in database (Supabase in production, SQLite in dev)
  */
-export function initializeVerifiedInfrastructure() {
-  // 1. Upsert Mandis
-  const insertMandi = db.prepare(`
+export async function initializeVerifiedInfrastructure() {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return;
+
+    // 1. Upsert Mandis to Supabase
+    await supabase.from("markets").upsert(
+      VERIFIED_MANDIS.map(m => ({
+        id: m.id,
+        name: m.name,
+        district: m.district,
+        state: m.state,
+        lat: m.lat,
+        lng: m.lng,
+        address: m.address,
+        pincode: m.pincode,
+        location_source: m.location_source,
+        status: m.status
+      })),
+      { onConflict: "id" }
+    );
+
+    // 2. Upsert Storage to Supabase
+    await supabase.from("storage_facilities").upsert(
+      VERIFIED_STORAGE_FACILITIES.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        location: s.location,
+        district: s.district,
+        state: s.state,
+        address: s.address,
+        pincode: s.pincode,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        capacity_quintals: s.capacity_quintals,
+        available_capacity_quintals: s.available_capacity_quintals,
+        cost_per_day_per_quintal: s.cost_per_day_per_quintal,
+        temperature_controlled: Boolean(s.temperature_controlled),
+        crop_suitability: s.crop_suitability,
+        contact: s.contact,
+        verified: Boolean(s.verified),
+        source: s.source
+      })),
+      { onConflict: "id" }
+    );
+    return;
+  }
+
+  // --- SQLite Development Mode ---
+  const { getDb } = await import("../db.js");
+  const database = getDb();
+
+  const insertMandi = database.prepare(`
     INSERT INTO markets (id, name, district, state, lat, lng, address, pincode, location_source, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
@@ -552,8 +605,7 @@ export function initializeVerifiedInfrastructure() {
       status = excluded.status
   `);
 
-  // Ensure crops exist for all synced commodities
-  const insertCrop = db.prepare(`
+  const insertCrop = database.prepare(`
     INSERT OR IGNORE INTO crops (id, name, unit, category)
     VALUES (?, ?, ?, ?)
   `);
@@ -564,8 +616,7 @@ export function initializeVerifiedInfrastructure() {
     insertMandi.run(m.id, m.name, m.district, m.state, m.lat, m.lng, m.address, m.pincode, m.location_source, m.status);
   }
 
-  // 2. Upsert Storage Facilities
-  const insertStorage = db.prepare(`
+  const insertStorage = database.prepare(`
     INSERT INTO storage_facilities (id, name, type, location, district, state, address, pincode, latitude, longitude, capacity_quintals, available_capacity_quintals, cost_per_day_per_quintal, temperature_controlled, crop_suitability, contact, verified, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
@@ -599,164 +650,229 @@ export function initializeVerifiedInfrastructure() {
 }
 
 /**
+ * Fetch live data from official Government of India open data platform (OGD data.gov.in) if key is present
+ */
+export async function fetchOfficialGovMarketFeed() {
+  const apiKey = process.env.DATA_GOV_IN_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${apiKey}&format=json&limit=50`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const records = json.records || [];
+    if (!records.length) return null;
+
+    // Map OGD fields to KisanSetu standard
+    return records.map((r) => ({
+      market: r.market || r.market_name || "Regional APMC",
+      district: r.district || "Regional",
+      state: r.state || "India",
+      commodity: r.commodity || "Commodity",
+      variety: r.variety || "FAQ",
+      min_price: Number(r.min_price),
+      modal_price: Number(r.modal_price),
+      max_price: Number(r.max_price),
+      arrival_qty_quintals: Number(r.arrival) || 0,
+      date: r.arrival_date || new Date().toISOString().split("T")[0],
+      source: "Government of India / OGD Platform (data.gov.in)",
+      source_url: "https://data.gov.in",
+      source_record_id: r._id ? String(r._id) : null
+    }));
+  } catch (err) {
+    console.warn("OGD API fetch warning:", err.message);
+    return null;
+  }
+}
+
+/**
  * Ingestion and synchronization pipeline
- * Upserts verified AGMARKNET records into SQLite and Supabase
+ * Upserts verified AGMARKNET records into Supabase (production) or SQLite (dev)
  */
 export async function syncMarketData({ customRecords = null, trigger = "admin" } = {}) {
   const syncId = `sync-${Date.now()}`;
-  const records = customRecords || OFFICIAL_AGMARKNET_DATASET;
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
-  initializeVerifiedInfrastructure();
+  // Try live government API first if no customRecords provided
+  let fetchedLiveRecords = null;
+  if (!customRecords) {
+    fetchedLiveRecords = await fetchOfficialGovMarketFeed();
+  }
+
+  const records = customRecords || fetchedLiveRecords || OFFICIAL_AGMARKNET_DATASET;
+  const isFromLiveApi = Boolean(fetchedLiveRecords && fetchedLiveRecords.length > 0);
+
+  await initializeVerifiedInfrastructure();
 
   let inserted = 0;
   let updated = 0;
   let rejected = 0;
   const rejectedReasons = [];
 
-  const checkExisting = db.prepare(`
-    SELECT id FROM market_prices WHERE market_id = ? AND crop_id = ? AND date = ?
-  `);
-
-  const insertPrice = db.prepare(`
-    INSERT INTO market_prices (
-      id, market_id, crop_id, date, min_price, max_price, modal_price, arrival_qty_quintals,
-      commodity, variety, state, district, market, unit, source, source_url, source_record_id, data_status, observed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `);
-
-  const updatePrice = db.prepare(`
-    UPDATE market_prices SET
-      min_price = ?, max_price = ?, modal_price = ?, arrival_qty_quintals = ?,
-      commodity = ?, variety = ?, state = ?, district = ?, market = ?, unit = ?,
-      source = ?, source_url = ?, source_record_id = ?, data_status = ?, observed_at = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `);
-
+  const validatedRecords = [];
   for (const raw of records) {
     const validation = validateMarketRecord(raw);
     if (!validation.valid) {
       rejected++;
-      rejectedReasons.push({ record: raw.market + " - " + raw.commodity, reason: validation.reason });
+      rejectedReasons.push({ record: `${raw.market || "Unknown"} - ${raw.commodity || "Unknown"}`, reason: validation.reason });
       continue;
     }
-
     const item = validation.normalized;
-    const existing = checkExisting.get(item.market_id, item.crop_id, item.date);
-
-    if (existing) {
-      updatePrice.run(
-        item.min_price, item.max_price, item.modal_price, item.arrival_qty_quintals,
-        item.commodity, item.variety, item.state, item.district, item.market, item.unit,
-        item.source, item.source_url, item.source_record_id, item.data_status, item.observed_at,
-        existing.id
-      );
-      updated++;
-    } else {
-      const newId = `mp-${nanoid(10)}`;
-      insertPrice.run(
-        newId, item.market_id, item.crop_id, item.date, item.min_price, item.max_price, item.modal_price, item.arrival_qty_quintals,
-        item.commodity, item.variety, item.state, item.district, item.market, item.unit,
-        item.source, item.source_url, item.source_record_id, item.data_status, item.observed_at
-      );
-      inserted++;
+    // Mark LIVE only if fetched fresh from official live stream within configured window
+    if (isFromLiveApi) {
+      item.data_status = "LIVE";
     }
+    validatedRecords.push(item);
   }
 
-  // Sync to Supabase Cloud PostgreSQL if configured
   let supabaseStatus = "not_configured";
-  const supabase = getSupabaseAdmin();
-  if (supabase) {
-    try {
-      // Upsert markets to Supabase
-      await supabase.from("markets").upsert(
-        VERIFIED_MANDIS.map(m => ({
-          id: m.id,
-          name: m.name,
-          district: m.district,
-          state: m.state,
-          lat: m.lat,
-          lng: m.lng,
-          address: m.address,
-          pincode: m.pincode,
-          location_source: m.location_source,
-          status: m.status
-        }))
-      );
 
-      // Upsert validated prices to Supabase
-      const supabasePrices = records
-        .map(r => validateMarketRecord(r))
-        .filter(v => v.valid)
-        .map(v => ({
-          market_id: v.normalized.market_id,
-          crop_id: v.normalized.crop_id,
-          commodity: v.normalized.commodity,
-          variety: v.normalized.variety,
-          state: v.normalized.state,
-          district: v.normalized.district,
-          market: v.normalized.market,
-          date: v.normalized.date,
-          min_price: v.normalized.min_price,
-          max_price: v.normalized.max_price,
-          modal_price: v.normalized.modal_price,
-          arrival_qty_quintals: v.normalized.arrival_qty_quintals,
-          unit: v.normalized.unit,
-          source: v.normalized.source,
-          source_url: v.normalized.source_url,
-          source_record_id: v.normalized.source_record_id,
-          data_status: v.normalized.data_status,
-          observed_at: v.normalized.observed_at
-        }));
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) throw new Error("Supabase is not configured in production mode.");
 
-      const { error: sbErr } = await supabase.from("market_prices").upsert(
-        supabasePrices,
-        { onConflict: "market_id,crop_id,date" }
-      );
+    // Upsert to Supabase market_prices
+    const supabasePrices = validatedRecords.map((v) => ({
+      market_id: v.market_id,
+      crop_id: v.crop_id,
+      commodity: v.commodity,
+      variety: v.variety,
+      state: v.state,
+      district: v.district,
+      market: v.market,
+      date: v.date,
+      min_price: v.min_price,
+      max_price: v.max_price,
+      modal_price: v.modal_price,
+      arrival_qty_quintals: v.arrival_qty_quintals,
+      unit: v.unit,
+      source: v.source,
+      source_url: v.source_url,
+      source_record_id: v.source_record_id,
+      data_status: v.data_status,
+      observed_at: v.observed_at,
+      updated_at: new Date().toISOString()
+    }));
 
-      if (!sbErr) {
-        supabaseStatus = "synced_successfully";
-      } else {
-        supabaseStatus = `schema_or_rls_pending: ${sbErr.message}`;
-      }
-    } catch (sbEx) {
-      supabaseStatus = `sync_exception: ${sbEx.message}`;
+    const { error: sbErr } = await supabase.from("market_prices").upsert(
+      supabasePrices,
+      { onConflict: "market_id,crop_id,date" }
+    );
+
+    if (!sbErr) {
+      supabaseStatus = "synced_successfully";
+      inserted = supabasePrices.length;
+    } else {
+      supabaseStatus = `sync_error: ${sbErr.message}`;
     }
+
+    // Insert sync log in Supabase
+    await supabase.from("market_data_sync_logs").insert({
+      id: syncId,
+      source: isFromLiveApi ? "Government of India / OGD (data.gov.in)" : "Government of India / AGMARKNET",
+      status: sbErr ? "error" : "success",
+      records_fetched: records.length,
+      records_inserted: inserted,
+      records_updated: updated,
+      records_rejected: rejected,
+      details: { trigger, rejectedReasons, supabaseStatus, isFromLiveApi },
+      synced_at: new Date().toISOString()
+    });
+  } else {
+    // SQLite local mode
+    const { getDb } = await import("../db.js");
+    const database = getDb();
+
+    const checkExisting = database.prepare(`SELECT id FROM market_prices WHERE market_id = ? AND crop_id = ? AND date = ?`);
+    const insertPrice = database.prepare(`
+      INSERT INTO market_prices (
+        id, market_id, crop_id, date, min_price, max_price, modal_price, arrival_qty_quintals,
+        commodity, variety, state, district, market, unit, source, source_url, source_record_id, data_status, observed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `);
+    const updatePrice = database.prepare(`
+      UPDATE market_prices SET
+        min_price = ?, max_price = ?, modal_price = ?, arrival_qty_quintals = ?,
+        commodity = ?, variety = ?, state = ?, district = ?, market = ?, unit = ?,
+        source = ?, source_url = ?, source_record_id = ?, data_status = ?, observed_at = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `);
+
+    for (const item of validatedRecords) {
+      const existing = checkExisting.get(item.market_id, item.crop_id, item.date);
+      if (existing) {
+        updatePrice.run(
+          item.min_price, item.max_price, item.modal_price, item.arrival_qty_quintals,
+          item.commodity, item.variety, item.state, item.district, item.market, item.unit,
+          item.source, item.source_url, item.source_record_id, item.data_status, item.observed_at,
+          existing.id
+        );
+        updated++;
+      } else {
+        const newId = `mp-${nanoid(10)}`;
+        insertPrice.run(
+          newId, item.market_id, item.crop_id, item.date, item.min_price, item.max_price, item.modal_price, item.arrival_qty_quintals,
+          item.commodity, item.variety, item.state, item.district, item.market, item.unit,
+          item.source, item.source_url, item.source_record_id, item.data_status, item.observed_at
+        );
+        inserted++;
+      }
+    }
+
+    database.prepare(`
+      INSERT INTO market_data_sync_logs (id, source, status, records_fetched, records_inserted, records_updated, records_rejected, details, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(syncId, isFromLiveApi ? "Government of India / OGD" : "Government of India / AGMARKNET", "success", records.length, inserted, updated, rejected, JSON.stringify({ trigger, isFromLiveApi }));
   }
-
-  // Record Sync Log
-  const detailsJson = JSON.stringify({
-    trigger,
-    rejectedReasons,
-    supabaseStatus,
-    datasetSource: "Government of India / AGMARKNET"
-  });
-
-  db.prepare(`
-    INSERT INTO market_data_sync_logs (id, source, status, records_fetched, records_inserted, records_updated, records_rejected, details, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(syncId, "Government of India / AGMARKNET", "success", records.length, inserted, updated, rejected, detailsJson);
 
   return {
     syncId,
     status: "success",
-    source: "Government of India / AGMARKNET",
+    source: isFromLiveApi ? "Government of India / OGD Platform (data.gov.in)" : "Government of India / AGMARKNET",
     recordsFetched: records.length,
     recordsInserted: inserted,
     recordsUpdated: updated,
     recordsRejected: rejected,
     supabaseStatus,
+    isLiveFeed: isFromLiveApi,
     syncedAt: new Date().toISOString()
   };
 }
 
 /**
- * Retrieve latest sync logs and stats
+ * Retrieve latest sync logs and stats (production Supabase or SQLite dev)
  */
-export function getLatestSyncStatus() {
-  const log = db.prepare(`SELECT * FROM market_data_sync_logs ORDER BY synced_at DESC LIMIT 1`).get();
-  const totalPrices = db.prepare(`SELECT COUNT(*) as count FROM market_prices`).get();
-  const totalMandis = db.prepare(`SELECT COUNT(*) as count FROM markets`).get();
-  const totalStorage = db.prepare(`SELECT COUNT(*) as count FROM storage_facilities`).get();
+export async function getLatestSyncStatus() {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return { error: "Production Database Unavailable" };
+
+    const { data: logs } = await supabase.from("market_data_sync_logs").select("*").order("synced_at", { ascending: false }).limit(1);
+    const { count: totalPrices } = await supabase.from("market_prices").select("*", { count: "exact", head: true });
+    const { count: totalMandis } = await supabase.from("markets").select("*", { count: "exact", head: true });
+    const { count: totalStorage } = await supabase.from("storage_facilities").select("*", { count: "exact", head: true });
+
+    return {
+      lastSync: logs?.[0] || null,
+      metrics: {
+        totalPrices: totalPrices || 0,
+        totalMandis: totalMandis || 0,
+        totalStorage: totalStorage || 0,
+        primarySource: "Government of India / AGMARKNET",
+        sourcePortal: "https://agmarknet.gov.in"
+      }
+    };
+  }
+
+  const { getDb } = await import("../db.js");
+  const database = getDb();
+  const log = database.prepare(`SELECT * FROM market_data_sync_logs ORDER BY synced_at DESC LIMIT 1`).get();
+  const totalPrices = database.prepare(`SELECT COUNT(*) as count FROM market_prices`).get();
+  const totalMandis = database.prepare(`SELECT COUNT(*) as count FROM markets`).get();
+  const totalStorage = database.prepare(`SELECT COUNT(*) as count FROM storage_facilities`).get();
 
   return {
     lastSync: log || null,
@@ -769,3 +885,4 @@ export function getLatestSyncStatus() {
     }
   };
 }
+

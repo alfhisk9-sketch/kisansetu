@@ -125,7 +125,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       },
     });
-    if (error) throw error;
+    if (error) {
+      if (error.message?.includes("provider is not enabled") || (error as any).code === "validation_failed") {
+        throw new Error("Google Sign-In is not currently enabled in the Supabase project dashboard. Please configure Google OAuth credentials in Supabase Auth Providers, or sign in with your username/demo account.");
+      }
+      throw error;
+    }
   }
 
   async function completeOAuthRegistration(role: "farmer" | "buyer" | "fpo") {

@@ -1,5 +1,12 @@
 # KisanSetu — Google Sign-In & Supabase Auth Setup Guide
 
+> [!NOTE]
+> **Current Status: EXTERNAL CONFIGURATION REQUIRED**
+>
+> If you encounter `400 validation_failed Unsupported provider: provider is not enabled`, Google OAuth is disabled in your Supabase project dashboard.
+> The frontend handles this gracefully by explaining the provider is not yet enabled and advising the user to use Email/Password or Demo accounts.
+> To enable Google OAuth, follow Section 3 below in your Supabase dashboard.
+
 This guide explains how Google Authentication is configured through **Supabase Auth** with Role-Based Access Control (RBAC) and profile synchronization.
 
 ---

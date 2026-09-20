@@ -150,4 +150,10 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`KisanSetu Platform API running on http://localhost:${PORT}`));
+let server;
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  server = app.listen(PORT, () => console.log(`KisanSetu Platform API running on http://localhost:${PORT}`));
+}
+export { app, server };
+export default app;

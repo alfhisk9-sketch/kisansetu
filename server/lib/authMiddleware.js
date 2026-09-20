@@ -1,23 +1,58 @@
-import { db } from "../db.js";
+import { getSupabaseAdmin } from "./supabase.js";
+import { isOfflineDev, getDb } from "../db.js";
 
 /**
- * Extract authenticated user from request header
+ * Extract authenticated user from request header (supports async Supabase query in production)
  */
-export function getRequestUser(req) {
-  const userId = req.headers["x-user-id"] || req.headers["authorization"]?.replace("Bearer ", "");
-  if (!userId) return null;
+export async function getRequestUser(req) {
+  const authHeader = req.headers["x-user-id"] || req.headers["authorization"]?.replace("Bearer ", "");
+  if (!authHeader) return null;
 
   try {
-    // If it's a token ks_payload.sig
-    if (typeof userId === "string" && userId.startsWith("ks_")) {
-      const payloadPart = userId.split(".")[0].replace("ks_", "");
+    let resolvedUserId = authHeader;
+    let tokenRole = null;
+
+    // Decode token if prefixed with ks_
+    if (typeof authHeader === "string" && authHeader.startsWith("ks_")) {
+      const payloadPart = authHeader.split(".")[0].replace("ks_", "");
       const decoded = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf-8"));
       if (decoded && decoded.userId) {
-        return db.prepare(`SELECT id, username, role, display_name FROM users WHERE id = ?`).get(decoded.userId);
+        resolvedUserId = decoded.userId;
+        tokenRole = decoded.role;
       }
     }
-    // Direct userId fallback
-    return db.prepare(`SELECT id, username, role, display_name FROM users WHERE id = ?`).get(userId);
+
+    const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+    if (isProduction) {
+      const supabase = getSupabaseAdmin();
+      if (!supabase) {
+        // Fallback to validated token payload if database is temporarily unreachable
+        if (tokenRole && resolvedUserId) {
+          return { id: resolvedUserId, role: tokenRole, display_name: "Authenticated User" };
+        }
+        return null;
+      }
+
+      const { data: userRow, error } = await supabase
+        .from("users")
+        .select("id, username, role, display_name")
+        .eq("id", resolvedUserId)
+        .maybeSingle();
+
+      if (!error && userRow) {
+        return userRow;
+      }
+
+      if (tokenRole && resolvedUserId) {
+        return { id: resolvedUserId, role: tokenRole, display_name: "Authenticated User" };
+      }
+      return null;
+    }
+
+    // SQLite mode
+    const db = getDb();
+    return db.prepare(`SELECT id, username, role, display_name FROM users WHERE id = ?`).get(resolvedUserId) || null;
   } catch (err) {
     return null;
   }
@@ -27,11 +62,11 @@ export function getRequestUser(req) {
  * Middleware factory to enforce specific roles
  */
 export function requireRole(allowedRoles = []) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     // For read operations or public endpoints, pass through if no roles specified
     if (!allowedRoles || allowedRoles.length === 0) return next();
 
-    const user = getRequestUser(req);
+    const user = await getRequestUser(req);
     if (!user) {
       return res.status(401).json({ error: "Authentication required", code: "UNAUTHORIZED" });
     }

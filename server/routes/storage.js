@@ -31,14 +31,19 @@ router.get("/", async (req, res) => {
   const nLng = Number(userLng);
   if (!isNaN(nLat) && !isNaN(nLng)) {
     rows = rows.map((r) => {
-      let distanceKm = null;
+      let straightLineDistanceKm = null;
       if (r.latitude && r.longitude) {
         const straight = calcHaversineDistanceKm(nLat, nLng, Number(r.latitude), Number(r.longitude));
-        distanceKm = straight != null ? Math.round(straight * 1.2) : null;
+        straightLineDistanceKm = straight != null ? Math.round(straight * 10) / 10 : null;
       }
-      return { ...r, distanceKm, distanceLabel: distanceKm ? `${distanceKm} km (approx.)` : "Distance on request" };
+      return {
+        ...r,
+        straightLineDistanceKm,
+        distanceKm: straightLineDistanceKm, // backwards compatibility
+        distanceLabel: straightLineDistanceKm != null ? `${straightLineDistanceKm} km (straight-line)` : "Location coordinates unavailable",
+      };
     });
-    rows.sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
+    rows.sort((a, b) => (a.straightLineDistanceKm ?? 9999) - (b.straightLineDistanceKm ?? 9999));
   }
 
   res.json(rows);

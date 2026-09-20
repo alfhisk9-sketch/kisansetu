@@ -1,200 +1,382 @@
 import { Router } from "express";
-import { db } from "../db.js";
+import { isOfflineDev, getDb } from "../db.js";
+import { getSupabaseAdmin } from "../lib/supabase.js";
 import { askGemini, buildGroundingContext } from "../lib/gemini.js";
-import { estimateDistanceKm, calcTransportCost, calcMarketCharges, calcNetRealization } from "../lib/algorithms.js";
+import {
+  calcHaversineDistanceKm,
+  estimateDistanceKm,
+  calcTransportCost,
+  calcMarketCharges,
+  calcNetRealization
+} from "../lib/algorithms.js";
 import { DISTRICT_DISTANCES } from "../data/distances.js";
 
 const router = Router();
 
-function ruleBasedAnswer(question, context) {
+// Known crop keywords for intent matching
+const CROP_SYNONYMS = {
+  "cotton": { id: "crop-cotton", name: "Cotton" },
+  "kapas": { id: "crop-cotton", name: "Cotton" },
+  "pratti": { id: "crop-cotton", name: "Cotton" },
+  "onion": { id: "crop-onion", name: "Onion" },
+  "pyaz": { id: "crop-onion", name: "Onion" },
+  "kanda": { id: "crop-onion", name: "Onion" },
+  "ullipaya": { id: "crop-onion", name: "Onion" },
+  "chilli": { id: "crop-chilli", name: "Chilli" },
+  "mirchi": { id: "crop-chilli", name: "Chilli" },
+  "tomato": { id: "crop-tomato", name: "Tomato" },
+  "tamatar": { id: "crop-tomato", name: "Tomato" },
+  "wheat": { id: "crop-wheat", name: "Wheat" },
+  "gehun": { id: "crop-wheat", name: "Wheat" },
+  "soybean": { id: "crop-soybean", name: "Soybean" },
+  "maize": { id: "crop-maize", name: "Maize" },
+  "makka": { id: "crop-maize", name: "Maize" },
+  "turmeric": { id: "crop-turmeric", name: "Turmeric" },
+  "haldi": { id: "crop-turmeric", name: "Turmeric" },
+  "pasupu": { id: "crop-turmeric", name: "Turmeric" },
+  "grapes": { id: "crop-grapes", name: "Grapes" },
+  "pomegranate": { id: "crop-pomegranate", name: "Pomegranate" },
+  "paddy": { id: "crop-paddy", name: "Paddy" },
+  "rice": { id: "crop-paddy", name: "Paddy" }
+};
+
+// Known location coordinates
+const LOCATION_COORDINATES = {
+  "bhimavaram": [16.5449, 81.5212],
+  "guntur": [16.2974, 80.4578],
+  "vijayawada": [16.5062, 80.6480],
+  "kurnool": [15.8281, 78.0373],
+  "eluru": [16.7107, 81.0952],
+  "kakinada": [16.9891, 82.2475],
+  "warangal": [17.9689, 79.5941],
+  "visakhapatnam": [17.6868, 83.2185],
+  "nellore": [14.4426, 79.9865],
+  "chittoor": [13.2172, 79.1003],
+  "kadapa": [14.4673, 78.8241],
+  "anantapur": [14.6819, 77.6006],
+  "tenali": [16.2435, 80.6400],
+  "duggirala": [16.3262, 80.6278]
+};
+
+/**
+ * Deterministic rule-based grounded answering engine
+ * Used when Gemini API is offline or as baseline ground truth
+ */
+function deterministicMarketAnswer(question, grounding) {
   const q = question.toLowerCase();
 
-  if (q.includes("grade a") || q.includes("what does grade") || q.includes("what is grade")) {
-    return "Grade A means the produce met the verified quality checklist: uniform size rating, optimum moisture, 3% or less visible damage, 2% or less foreign matter, and healthy appearance. Quality grades are verified by FPO field officers or certified assayers.";
+  // If crop was requested but no price data is present
+  if (grounding.requestedCrop && (!grounding.prices || grounding.prices.length === 0)) {
+    return `I don't have verified current data for this crop/location. As a trusted market assistant, I only report verified government market records.`;
   }
-  if (q.includes("transport") && (q.includes("earn") || q.includes("cost") || q.includes("net"))) {
-    return "Transport cost is deducted per quintal from the mandi headline price to determine your Net Realization. Often, a closer market with a slightly lower price yields higher take-home profit than a distant market once fuel and logistics are accounted for.";
-  }
-  if (q.includes("where should i sell") || q.includes("best market") || q.includes("recommend")) {
-    if (context?.topOption) {
-      const o = context.topOption;
-      return `Based on live verified mandi arrivals, ${o.marketName} (${o.district}) offers the highest estimated net realization (₹${o.netRealization}/q, modal ₹${o.modalPrice}/q, distance ${o.distanceKm}km). Recommendation score: ${o.recommendationScore}/100.`;
+
+  // Price or selling query for identified crop
+  if (grounding.crop && grounding.nearestMarket) {
+    const top = grounding.nearestMarket;
+    const dateFormatted = top.date || "Latest trading session";
+    const others = (grounding.nearbyComparisons || []).slice(0, 3);
+
+    let comparisonText = "";
+    if (others.length > 0) {
+      comparisonText = `\n\nNearby market comparison:\n` +
+        others.map(o => `• ${o.marketName} (${o.district}): ₹${o.modalPrice}/quintal (straight-line distance: ${o.distanceKm} km)`).join("\n");
     }
-    return "To find your best market, select your crop and district in Market Intelligence. The platform automatically calculates net realization across nearby mandis.";
+
+    return `${grounding.crop.name} price near you:
+
+Nearest verified market:
+${top.marketName} (${top.district}) — ${top.distanceKm} km straight-line distance
+
+Latest available:
+• Modal price: ₹${top.modalPrice}/quintal
+• Minimum: ₹${top.minPrice || top.modalPrice}/quintal
+• Maximum: ₹${top.maxPrice || top.modalPrice}/quintal
+• Arrival quantity: ${top.arrivalQty ? `${top.arrivalQty} quintals` : "Arrivals recorded"}
+
+Market date:
+${dateFormatted}
+
+Source:
+${top.source || "Government of India / AGMARKNET"}
+
+Data status:
+${top.dataStatus || "LATEST AVAILABLE"}${comparisonText}
+
+Estimated Net Realization: ₹${top.netRealization}/quintal (after documented transport ₹${top.transportCost}/q and mandi charges ₹${top.marketCharges}/q).
+Note: Prices fluctuate with daily arrivals and quality grades.`;
   }
-  if (q.includes("why is") && q.includes("recommended")) {
-    if (context?.topOption) {
-      return `${context.topOption.marketName} is recommended because: ${context.topOption.reasons.join("; ")}.`;
+
+  // Nearest mandi generic query
+  if (q.includes("nearest") || q.includes("mandi near")) {
+    if (grounding.allNearestMarkets && grounding.allNearestMarkets.length > 0) {
+      const list = grounding.allNearestMarkets.slice(0, 3).map((m, idx) => 
+        `${idx + 1}. ${m.name} (${m.district}) — ${m.distanceKm} km (Verified APMC)`
+      ).join("\n");
+      return `Nearest verified APMC Mandis based on your location:\n\n${list}\n\nYou can view them on the interactive Mandi Map with live arrival directions.`;
     }
-    return "Market recommendations prioritize highest net take-home price, minimal transport distance, 7-day price momentum, and verified buyer demand.";
   }
-  if (q.includes("storage") || q.includes("hold") || q.includes("warehouse")) {
-    return "You can check verified cold storages and warehouses under the Storage tab. Look for capacity, daily storage cost per quintal, and crop suitability before deciding to hold your harvest.";
+
+  // Storage query
+  if (q.includes("storage") || q.includes("hold") || q.includes("warehouse") || q.includes("cold storage")) {
+    if (grounding.storages && grounding.storages.length > 0) {
+      const sList = grounding.storages.slice(0, 3).map(s => 
+        `• ${s.name} (${s.district}): ₹${s.cost_per_day_per_quintal || 1}/q/day, Space available: ${s.available_capacity_quintals || "Available"}q`
+      ).join("\n");
+      return `Verified storage facilities near your district:\n\n${sList}\n\nYou can request space or calculate holding cost under the Storage tab.`;
+    }
   }
-  if (q.includes("accura") || q.includes("forecast") || q.includes("predict")) {
-    return "Price forecasts use a ridge-regression baseline trained on historical mandi arrivals. We transparently show actual MAE, RMSE, and R² metrics rather than fabricated accuracy numbers.";
+
+  // Quality grading query
+  if (q.includes("grade a") || q.includes("what is grade") || q.includes("quality")) {
+    return "Grade A represents FAQ (Fair Average Quality) meeting standard benchmarks: uniform size, optimum moisture (< 12%), less than 3% visual defects, and zero foreign contaminants. Quality grades are verified transparently by FPO field assayers.";
   }
-  return "Namaste! I am KisanSetu AI Saathi. I can help you analyze net realizations, quality grading, mandi prices, and buyer demands using verified platform data. Try asking: 'Where should I sell my crop?', 'What is Grade A?', or 'How does transport cost affect my earnings?'";
+
+  // Transport calculation explanation
+  if (q.includes("transport") && (q.includes("cost") || q.includes("net") || q.includes("affect"))) {
+    return "Transport cost is calculated based on distance and shipment quantity, then subtracted from the mandi headline price to determine your Net Realization. Often, a closer mandi with a slightly lower price yields higher take-home profit than a distant mandi once freight charges are factored in.";
+  }
+
+  return "Namaste! I am KisanSetu AI Saathi. I answer agricultural market questions using verified government data. Try asking: 'What is the price of 1 quintal cotton near me?', 'Which mandi is nearest?', or 'What is today's onion price?'";
 }
 
+/**
+ * POST /api/assistant/ask
+ * Grounded AI assistant endpoint
+ */
 const askHandler = async (req, res) => {
-  const { question, lotId, cropId, district, userId, locale = "en" } = req.body;
+  const { question, lotId, cropId, district, userLat, userLng, userId, locale = "en" } = req.body;
   if (!question || typeof question !== "string" || !question.trim()) {
     return res.status(400).json({ error: "question is required" });
   }
 
-  let context = {};
-  try {
-    // 1. Gather user context
-    if (userId) {
-      const userRow = db.prepare(`SELECT id, display_name, role, location FROM users WHERE id = ?`).get(userId);
-      if (userRow) context.user = userRow;
-    }
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const lowerQ = question.toLowerCase();
 
-    // 2. Gather lot context
-    let targetCropId = cropId;
-    let targetDistrict = district || context.user?.location?.split(",")?.[1]?.trim() || "Guntur";
-
-    if (lotId) {
-      const lot = db.prepare(`
-        SELECT l.*, c.name as crop_name, c.category as crop_category
-        FROM lots l
-        LEFT JOIN crops c ON l.crop_id = c.id
-        WHERE l.id = ?
-      `).get(lotId);
-      if (lot) {
-        context.lot = lot;
-        targetCropId = targetCropId || lot.crop_id;
-        targetDistrict = targetDistrict || lot.district;
+  // 1. Identify Crop from question or request parameters
+  let identifiedCrop = null;
+  if (cropId) {
+    identifiedCrop = { id: cropId, name: cropId.replace("crop-", "") };
+  } else {
+    for (const [kw, c] of Object.entries(CROP_SYNONYMS)) {
+      if (lowerQ.includes(kw)) {
+        identifiedCrop = c;
+        break;
       }
     }
-
-    // 3. Gather crop and mandi prices
-    if (targetCropId) {
-      const cropRow = db.prepare(`SELECT * FROM crops WHERE id = ? OR name LIKE ?`).get(targetCropId, `%${targetCropId}%`);
-      if (cropRow) {
-        context.crop = cropRow;
-        targetCropId = cropRow.id;
-        
-        const recentPrices = db.prepare(`
-          SELECT mp.*, m.name as market_name, m.district as market_district
-          FROM market_prices mp
-          JOIN markets m ON mp.market_id = m.id
-          WHERE mp.crop_id = ?
-          ORDER BY mp.date DESC
-          LIMIT 8
-        `).all(targetCropId);
-        context.prices = recentPrices;
-
-        // Calculate top market comparison option
-        try {
-          const markets = db.prepare(`SELECT * FROM markets`).all();
-          let best = null;
-          for (const mkt of markets) {
-            const latestPrice = db.prepare(
-              `SELECT modal_price FROM market_prices WHERE crop_id = ? AND market_id = ? ORDER BY date DESC LIMIT 1`
-            ).get(targetCropId, mkt.id);
-            if (!latestPrice) continue;
-
-            const dist = estimateDistanceKm(DISTRICT_DISTANCES, targetDistrict, mkt.district);
-            const transport = calcTransportCost({ distanceKm: dist, quantityQuintals: 10 });
-            const charges = calcMarketCharges(latestPrice.modal_price);
-            const net = calcNetRealization({ sellingPrice: latestPrice.modal_price, transportCost: transport, marketCharges: charges });
-
-            if (!best || net > best.netRealization) {
-              best = {
-                marketName: mkt.name,
-                district: mkt.district,
-                modalPrice: latestPrice.modal_price,
-                distanceKm: dist,
-                latitude: mkt.latitude,
-                longitude: mkt.longitude,
-                transportCostPerQuintal: transport,
-                netRealization: net,
-                recommendationScore: 88,
-                reasons: [`Highest net realization (₹${net}/q)`]
-              };
-            }
-          }
-          if (best) context.topOption = best;
-        } catch (compErr) {
-          // ignore comparison calculation failure
-        }
-      }
-    }
-
-    // 4. Gather regional storage facilities
-    try {
-      const storages = db.prepare(`SELECT * FROM storage_facilities LIMIT 4`).all();
-      context.storages = storages;
-    } catch (e) {}
-
-    // 5. Gather active lots for the user if available
-    if (userId) {
-      const userLots = db.prepare(`
-        SELECT l.*, c.name as crop_name
-        FROM lots l
-        LEFT JOIN crops c ON l.crop_id = c.id
-        WHERE l.owner_id = ?
-        ORDER BY l.created_at DESC
-        LIMIT 3
-      `).all(userId);
-      if (userLots.length > 0) context.lots = userLots;
-    }
-  } catch (e) {
-    console.warn("Context build error for assistant:", e.message);
   }
 
-  // Check if Gemini API key exists
+  // 2. Identify Location coordinates from question, request body, or defaults
+  let targetCoords = null;
+  let targetDistrict = district || "Guntur";
+
+  if (userLat && userLng && !isNaN(Number(userLat)) && !isNaN(Number(userLng))) {
+    targetCoords = [Number(userLat), Number(userLng)];
+  } else {
+    for (const [locName, coords] of Object.entries(LOCATION_COORDINATES)) {
+      if (lowerQ.includes(locName)) {
+        targetCoords = coords;
+        targetDistrict = locName.charAt(0).toUpperCase() + locName.slice(1);
+        break;
+      }
+    }
+  }
+
+  if (!targetCoords) {
+    targetCoords = LOCATION_COORDINATES[targetDistrict.toLowerCase()] || [16.2974, 80.4578]; // default Guntur
+  }
+
+  // 3. Fetch data from Supabase (production) or SQLite (dev)
+  let marketsData = [];
+  let pricesData = [];
+  let storageData = [];
+
+  try {
+    if (isProduction) {
+      const supabase = getSupabaseAdmin();
+      if (supabase) {
+        const { data: mData } = await supabase.from("markets").select("*");
+        marketsData = mData || [];
+
+        if (identifiedCrop) {
+          const { data: pData } = await supabase
+            .from("market_prices")
+            .select("*")
+            .eq("crop_id", identifiedCrop.id)
+            .order("date", { ascending: false });
+          pricesData = pData || [];
+        } else {
+          const { data: pData } = await supabase
+            .from("market_prices")
+            .select("*")
+            .order("date", { ascending: false })
+            .limit(30);
+          pricesData = pData || [];
+        }
+
+        const { data: sData } = await supabase.from("storage_facilities").select("*").limit(5);
+        storageData = sData || [];
+      }
+    } else {
+      const db = getDb();
+      marketsData = db.prepare(`SELECT * FROM markets`).all();
+      if (identifiedCrop) {
+        pricesData = db.prepare(`SELECT * FROM market_prices WHERE crop_id = ? ORDER BY date DESC`).all(identifiedCrop.id);
+      } else {
+        pricesData = db.prepare(`SELECT * FROM market_prices ORDER BY date DESC LIMIT 30`).all();
+      }
+      storageData = db.prepare(`SELECT * FROM storage_facilities LIMIT 5`).all();
+    }
+  } catch (dbErr) {
+    console.warn("Database lookup error for AI Saathi:", dbErr.message);
+  }
+
+  // 4. Deterministic Backend Calculations
+  let nearestMarket = null;
+  const nearbyComparisons = [];
+  const allNearestMarkets = [];
+
+  for (const m of marketsData) {
+    const mLat = Number(m.lat || m.latitude);
+    const mLng = Number(m.lng || m.longitude);
+    if (isNaN(mLat) || isNaN(mLng)) continue;
+
+    const straightDist = calcHaversineDistanceKm(targetCoords[0], targetCoords[1], mLat, mLng);
+    allNearestMarkets.push({
+      id: m.id,
+      name: m.name,
+      district: m.district,
+      distanceKm: straightDist
+    });
+
+    if (identifiedCrop) {
+      const priceRow = pricesData.find((p) => p.market_id === m.id);
+      if (priceRow) {
+        const modal = Number(priceRow.modal_price);
+        const transport = calcTransportCost({ distanceKm: Math.round(straightDist * 1.22), quantityQuintals: 1 });
+        const charges = calcMarketCharges(modal);
+        const net = calcNetRealization({ sellingPrice: modal, transportCost: transport, marketCharges: charges });
+
+        const marketObj = {
+          marketId: m.id,
+          marketName: m.name,
+          district: m.district,
+          distanceKm: straightDist,
+          modalPrice: modal,
+          minPrice: priceRow.min_price || modal,
+          maxPrice: priceRow.max_price || modal,
+          arrivalQty: priceRow.arrival_qty_quintals,
+          date: priceRow.date,
+          source: priceRow.source || "Government of India / AGMARKNET",
+          dataStatus: priceRow.data_status || "LATEST AVAILABLE",
+          transportCost: transport,
+          marketCharges: charges,
+          netRealization: net
+        };
+
+        if (!nearestMarket || straightDist < nearestMarket.distanceKm) {
+          nearestMarket = marketObj;
+        }
+        nearbyComparisons.push(marketObj);
+      }
+    }
+  }
+
+  allNearestMarkets.sort((a, b) => a.distanceKm - b.distanceKm);
+  nearbyComparisons.sort((a, b) => a.distanceKm - b.distanceKm);
+
+  if (!nearestMarket && allNearestMarkets.length > 0) {
+    const closest = allNearestMarkets[0];
+    nearestMarket = {
+      marketId: closest.id,
+      marketName: closest.name,
+      district: closest.district,
+      distanceKm: closest.distanceKm,
+      source: "Government of India / AGMARKNET APMC Directory",
+      dataStatus: "VERIFIED DIRECTORY"
+    };
+  }
+
+  // 5. Build structured grounding context
+  const groundingContext = {
+    requestedCrop: identifiedCrop,
+    crop: identifiedCrop,
+    userLocation: {
+      latitude: targetCoords[0],
+      longitude: targetCoords[1],
+      district: targetDistrict
+    },
+    nearestMarket,
+    nearbyComparisons,
+    allNearestMarkets,
+    prices: pricesData,
+    storages: storageData,
+    provenance: "Government of India / AGMARKNET (https://agmarknet.gov.in)"
+  };
+
+  // If crop was asked but not present in database
+  if (identifiedCrop && (!pricesData || pricesData.length === 0)) {
+    return res.json({
+      answer: "I don't have verified current data for this crop/location.",
+      source: "grounded-verifier",
+      configured: Boolean(process.env.GEMINI_API_KEY),
+      groundingSummary: {
+        crop: identifiedCrop.name,
+        verifiedRecordsFound: 0
+      }
+    });
+  }
+
+  // 6. Invoke Gemini if key is configured, with structured grounding
   const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
 
-  if (!hasGeminiKey) {
-    return res.json({
-      answer: ruleBasedAnswer(question, context),
-      source: "grounded-rules",
-      configured: false,
-      note: "AI Assistant is operating in verified deterministic rule mode (GEMINI_API_KEY not configured).",
-      contextSnippet: {
-        crop: context.crop?.name,
-        topMarket: context.topOption?.marketName,
-        topNetRealization: context.topOption?.netRealization
-      }
+  if (hasGeminiKey) {
+    const formattedPrompt = `GROUNDING DATA CONTEXT (FROM VERIFIED SUPABASE DATABASE):
+Crop: ${identifiedCrop?.name || "General Mandi Discovery"}
+User Location: ${targetDistrict} (${targetCoords[0].toFixed(4)}, ${targetCoords[1].toFixed(4)})
+Nearest Mandi: ${nearestMarket ? `${nearestMarket.marketName} (${nearestMarket.district}) - ${nearestMarket.distanceKm} km straight-line distance${nearestMarket.modalPrice ? `, Modal: ₹${nearestMarket.modalPrice}/q, Min: ₹${nearestMarket.minPrice}, Max: ₹${nearestMarket.maxPrice}, Date: ${nearestMarket.date}, Status: ${nearestMarket.dataStatus}, Source: ${nearestMarket.source}` : ""}` : "None verified"}
+Nearby Comparisons: ${nearbyComparisons.slice(0, 3).map(c => `${c.marketName}: ₹${c.modalPrice}/q (${c.distanceKm} km)`).join("; ")}
+Storage Facilities: ${storageData.slice(0, 2).map(s => `${s.name}: ₹${s.cost_per_day_per_quintal}/q/day`).join("; ")}
+
+INSTRUCTION TO AI SAATHI:
+Explain the factual findings above concisely and clearly to the user in response to their question.
+Use the EXACT numbers from the grounding data. Do not hallucinate or guess any other price numbers.
+Include data source, date, and data status.`;
+
+    const aiResult = await askGemini({
+      question,
+      context: formattedPrompt,
+      locale
     });
+
+    if (aiResult.success) {
+      return res.json({
+        answer: aiResult.text,
+        source: aiResult.source || "gemini",
+        configured: true,
+        groundingSummary: {
+          crop: identifiedCrop?.name,
+          nearestMarket: nearestMarket?.marketName,
+          modalPrice: nearestMarket?.modalPrice,
+          straightLineDistanceKm: nearestMarket?.distanceKm,
+          status: nearestMarket?.dataStatus || "LATEST AVAILABLE"
+        }
+      });
+    }
   }
 
-  // Format grounding context and invoke Gemini 1.5 Flash
-  const formattedContext = buildGroundingContext({
-    user: context.user,
-    crop: context.crop,
-    lots: context.lots,
-    prices: context.prices,
-    topOption: context.topOption,
-    storages: context.storages,
-    locale
-  });
-
-  const aiResult = await askGemini({ question, context: formattedContext, locale });
-
-  if (aiResult.success) {
-    return res.json({
-      answer: aiResult.text,
-      source: aiResult.source || "gemini",
-      configured: true,
-      contextSnippet: {
-        crop: context.crop?.name,
-        topMarket: context.topOption?.marketName,
-        topNetRealization: context.topOption?.netRealization
-      }
-    });
-  }
-
-  // Fallback to grounded rule-based answer if upstream error/timeout occurred
+  // Deterministic rule engine fallback
+  const answer = deterministicMarketAnswer(question, groundingContext);
   return res.json({
-    answer: ruleBasedAnswer(question, context),
-    source: "grounded-rules-fallback",
-    configured: true,
-    note: "AI Assistant temporarily fell back to verified platform data rules due to upstream service latency.",
-    detail: aiResult.message
+    answer,
+    source: "grounded-deterministic",
+    configured: hasGeminiKey,
+    groundingSummary: {
+      crop: identifiedCrop?.name,
+      nearestMarket: nearestMarket?.marketName,
+      modalPrice: nearestMarket?.modalPrice,
+      straightLineDistanceKm: nearestMarket?.distanceKm,
+      status: nearestMarket?.dataStatus || "LATEST AVAILABLE"
+    }
   });
 };
 
