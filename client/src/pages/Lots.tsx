@@ -15,6 +15,8 @@ export default function Lots() {
   const { t } = useLocale();
   const [lots, setLots] = useState<any[]>([]);
   const [crops, setCrops] = useState<Crop[]>([]);
+  const [cropsLoading, setCropsLoading] = useState(true);
+  const [cropsError, setCropsError] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -34,35 +36,103 @@ export default function Lots() {
     notes: ""
   });
 
+  async function loadCrops() {
+    setCropsLoading(true);
+    setCropsError(null);
+    try {
+      const data = await api.get("/crops");
+      if (Array.isArray(data) && data.length > 0) {
+        setCrops(data);
+        setForm((f: any) => {
+          const validId = f.cropId && data.some((c: any) => (c.id || c.crop_id) === f.cropId);
+          if (validId) return f;
+          return { ...f, cropId: data[0]?.id || data[0]?.crop_id };
+        });
+      } else {
+        setCrops([]);
+      }
+    } catch (err: any) {
+      console.error("Failed to load authoritative crops:", err);
+      setCropsError(err.message || "Unable to load crops. Please try again.");
+    } finally {
+      setCropsLoading(false);
+    }
+  }
+
   async function load() {
-    const ownerId = profile?.id;
-    const data = await api.get(`/lots?ownerId=${ownerId}&ownerType=${user?.role}`);
-    setLots(data);
+    const ownerId = profile?.id || user?.id;
+    const ownerType = user?.role === "fpo" ? "fpo" : "farmer";
+    if (!ownerId) return;
+    try {
+      const data = await api.get(`/lots?ownerId=${ownerId}&ownerType=${ownerType}`);
+      setLots(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      console.warn("Failed to load lots:", err.message);
+    }
   }
 
   useEffect(() => {
-    api.get("/crops").then((data) => { 
-      setCrops(data); 
-      setForm((f: any) => ({ ...f, cropId: data[0]?.id })); 
-    });
-    if (profile) load();
-    // eslint-disable-next-line
-  }, [profile]);
+    loadCrops();
+  }, []);
+
+  useEffect(() => {
+    if (profile?.id || user?.id) {
+      load();
+    }
+  }, [profile?.id, user?.id, user?.role]);
 
   async function createLot(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.cropId) {
+      alert("Please select a valid crop before creating a lot.");
+      return;
+    }
     setSaving(true);
     try {
-      await api.post("/lots", { ...form, ownerId: profile?.id, ownerType: user?.role });
+      const ownerId = profile?.id || user?.id;
+      const ownerType = user?.role === "fpo" ? "fpo" : "farmer";
+      await api.post("/lots", { 
+        ...form, 
+        crop_id: form.cropId,
+        cropId: form.cropId,
+        farmer_id: ownerId,
+        ownerId, 
+        ownerType,
+        quantity_unit: "quintal"
+      });
       setShowWizard(false);
       setStep(1);
       load();
+    } catch (err: any) {
+      alert(err.message || "Failed to create produce lot. Please try again.");
     } finally {
       setSaving(false);
     }
   }
 
-  const selectedCropObj = crops.find((c) => c.id === form.cropId);
+  const selectedCropObj = crops.find((c) => (c.id || (c as any).crop_id) === form.cropId);
+
+  // Suggested verified varieties for quick selection
+  const KNOWN_VARIETIES: Record<string, string[]> = {
+    "crop-cotton": ["Bt Cotton", "DCH-32", "Suraj"],
+    "crop-onion": ["Bhima Super", "Nashik Red", "Agrifound Dark Red"],
+    "crop-chilli": ["Teja", "Byadagi", "Guntur Sannam"],
+    "crop-tomato": ["Vaishali", "Abhinav", "Pusa Ruby"],
+    "crop-wheat": ["Sharbati", "Lokwan", "HD-2967"],
+    "crop-soybean": ["JS 335", "JS 9560", "MACS 1407"],
+    "crop-maize": ["DHM 117", "Pioneer Hybrid", "Kaveri 50"],
+    "crop-turmeric": ["Salem", "Pratibha", "Duggirala"],
+    "crop-paddy": ["BPT 5204 (Samba Mahsuri)", "MTU 1010", "Swarna"],
+    "crop-groundnut": ["JL 24", "TMV 2", "Kadiri 6"],
+    "crop-sugarcane": ["Co 0238", "Co 86032", "CoM 0265"],
+    "crop-bengal-gram": ["JG 11", "KAK 2", "JAKI 9218"],
+    "crop-red-gram": ["Asha (ICPL 87119)", "Maruti", "BSMR 736"],
+    "crop-green-gram": ["IPM 02-03", "Samrat", "Virat"],
+    "crop-black-gram": ["LBG 752", "PU 31", "Shekhar 2"],
+    "crop-grapes": ["Thompson Seedless", "Tas-A-Ganesh", "Sharad Seedless"],
+    "crop-pomegranate": ["Bhagwa", "Arakta", "Ganesh"]
+  };
+  const currentVarieties = form.cropId ? (KNOWN_VARIETIES[form.cropId] || []) : [];
 
   return (
     <div className="space-y-5">
@@ -106,14 +176,49 @@ export default function Lots() {
               <div className="space-y-4">
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="field-label">{t("common.fields.crop")}</label>
-                    <select 
-                      className="input" 
-                      value={form.cropId} 
-                      onChange={(e) => setForm({ ...form, cropId: e.target.value })}
-                    >
-                      {crops.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.category})</option>)}
-                    </select>
+                    <label className="field-label" htmlFor="crop-select">
+                      {t("common.fields.crop")} <span className="text-red-500">*</span>
+                    </label>
+                    {cropsLoading ? (
+                      <div className="flex items-center gap-2 p-2.5 rounded-lg border border-stone-200 bg-stone-50 text-xs text-stone-500">
+                        <span className="w-3.5 h-3.5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
+                        <span>Loading crops...</span>
+                      </div>
+                    ) : cropsError ? (
+                      <div className="space-y-1.5">
+                        <div className="text-xs text-red-600 bg-red-50 border border-red-200 p-2.5 rounded-lg">
+                          {cropsError}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={loadCrops}
+                          className="text-xs text-brand-700 hover:text-brand-800 font-semibold underline"
+                        >
+                          Retry loading crops
+                        </button>
+                      </div>
+                    ) : crops.length === 0 ? (
+                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                        No crops are currently available.
+                      </div>
+                    ) : (
+                      <select 
+                        id="crop-select"
+                        className="input font-medium" 
+                        value={form.cropId} 
+                        onChange={(e) => setForm({ ...form, cropId: e.target.value })}
+                        required
+                      >
+                        {crops.map((c) => {
+                          const cid = c.id || (c as any).crop_id;
+                          return (
+                            <option key={cid} value={cid}>
+                              {c.name} {c.category ? `(${c.category})` : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
                   </div>
                   <div>
                     <label className="field-label">{t("lots.varietyLabel")}</label>
@@ -123,6 +228,25 @@ export default function Lots() {
                       onChange={(e) => setForm({ ...form, variety: e.target.value })} 
                       placeholder="e.g. Teja, Byadagi, Desi, Hybrid" 
                     />
+                    {currentVarieties.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1.5">
+                        <span className="text-[11px] text-stone-400">Suggestions:</span>
+                        {currentVarieties.map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setForm({ ...form, variety: v })}
+                            className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                              form.variety === v
+                                ? "bg-brand-100 border-brand-400 text-brand-900 font-bold"
+                                : "bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100"
+                            }`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -135,6 +259,7 @@ export default function Lots() {
                   <button 
                     type="button" 
                     onClick={() => setStep(2)} 
+                    disabled={!form.cropId || cropsLoading}
                     className="btn-primary text-xs"
                   >
                     Next: Quantity & Quality <ArrowRight size={14} />
@@ -338,7 +463,9 @@ export default function Lots() {
         />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {lots.map((l) => (
+          {lots.map((l) => {
+            const cropTitle = l.crop_name || crops.find(c => (c.id || (c as any).crop_id) === l.crop_id)?.name || "Produce";
+            return (
             <div key={l.id} className="card p-5 hover:border-brand-300 hover:shadow-card transition-all flex flex-col justify-between">
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
@@ -346,7 +473,7 @@ export default function Lots() {
                   <StatusBadge status={l.status} />
                 </div>
 
-                <h3 className="text-base font-bold text-stone-900">{l.crop_name}</h3>
+                <h3 className="text-base font-bold text-stone-900">{cropTitle}</h3>
                 {l.variety && <p className="text-xs text-stone-500 font-medium">Variety: {l.variety}</p>}
 
                 <div className="grid grid-cols-2 gap-2 my-3 py-2.5 border-y border-stone-100 text-xs">
@@ -378,7 +505,8 @@ export default function Lots() {
                 </Link>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>

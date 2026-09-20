@@ -4,12 +4,15 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 import { nanoid } from "nanoid";
 import { computeGrade, compareStoreVsSellNow, calcMarketCharges } from "../lib/algorithms.js";
 import { assertRequired } from "../lib/validate.js";
+import { AUTHORITATIVE_CROPS_CATALOG } from "../services/cropMasterService.js";
 
 const router = Router();
 
 router.get("/", async (req, res) => {
   const { ownerId, ownerType, status } = req.query;
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  const catalogMap = new Map(AUTHORITATIVE_CROPS_CATALOG.map(c => [c.crop_id, c.name]));
 
   if (isProduction) {
     const supabase = getSupabaseAdmin();
@@ -26,7 +29,7 @@ router.get("/", async (req, res) => {
 
       const mapped = (data || []).map((l) => ({
         ...l,
-        crop_name: l.crops?.name || "Produce"
+        crop_name: l.crops?.name || catalogMap.get(l.crop_id) || "Produce"
       }));
       return res.json(mapped);
     } catch (err) {
@@ -41,11 +44,13 @@ router.get("/", async (req, res) => {
   if (ownerType) { query += ` AND l.owner_type = ?`; params.push(ownerType); }
   if (status) { query += ` AND l.status = ?`; params.push(status); }
   query += ` ORDER BY l.created_at DESC`;
-  res.json(db.prepare(query).all(...params));
+  const rows = db.prepare(query).all(...params);
+  res.json(rows.map(r => ({ ...r, crop_name: r.crop_name || catalogMap.get(r.crop_id) || "Produce" })));
 });
 
 router.get("/:id", async (req, res) => {
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const catalogMap = new Map(AUTHORITATIVE_CROPS_CATALOG.map(c => [c.crop_id, c.name]));
 
   if (isProduction) {
     const supabase = getSupabaseAdmin();
@@ -78,7 +83,7 @@ router.get("/:id", async (req, res) => {
 
       return res.json({
         ...lot,
-        crop_name: lot.crops?.name || "Produce",
+        crop_name: lot.crops?.name || catalogMap.get(lot.crop_id) || "Produce",
         grades: grades || [],
         offers: mappedOffers
       });
@@ -92,12 +97,29 @@ router.get("/:id", async (req, res) => {
   if (!lot) return res.status(404).json({ error: "Lot not found" });
   const grades = db.prepare(`SELECT * FROM quality_grades WHERE lot_id = ?`).all(lot.id);
   const offers = db.prepare(`SELECT o.*, b.name as buyer_name FROM offers o JOIN buyers b ON b.id = o.buyer_id WHERE o.lot_id = ? ORDER BY o.created_at DESC`).all(lot.id);
-  res.json({ ...lot, grades, offers });
+  res.json({ ...lot, crop_name: lot.crop_name || catalogMap.get(lot.crop_id) || "Produce", grades, offers });
 });
 
 router.post("/", async (req, res) => {
-  if (!assertRequired(req, res, ["ownerType", "ownerId", "cropId", "quantityQuintals", "location", "district"])) return;
-  const b = req.body;
+  const b = req.body || {};
+  const ownerType = b.ownerType || b.owner_type || (b.farmer_id ? "farmer" : "farmer");
+  const ownerId = b.ownerId || b.owner_id || b.farmer_id;
+  const cropId = b.cropId || b.crop_id;
+  const quantityQuintals = Number(b.quantityQuintals !== undefined ? b.quantityQuintals : (b.quantity_quintals !== undefined ? b.quantity_quintals : b.quantity));
+  const location = b.location || b.village;
+  const district = b.district;
+
+  if (!ownerId || !cropId || !quantityQuintals || !location || !district) {
+    return res.status(400).json({
+      error: "Missing required lot fields. Required: ownerId (or farmer_id), cropId (or crop_id), quantityQuintals, location, district"
+    });
+  }
+
+  if (!cropId.startsWith("crop-")) {
+    return res.status(400).json({ error: `Invalid cropId '${cropId}'. Must be a canonical crop ID (e.g. crop-cotton)` });
+  }
+
+  const catalogItem = AUTHORITATIVE_CROPS_CATALOG.find(c => c.crop_id === cropId);
   const lotId = b.id || `LOT-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
   const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
 
@@ -110,19 +132,19 @@ router.post("/", async (req, res) => {
         .from("lots")
         .insert({
           id: lotId,
-          owner_type: b.ownerType,
-          owner_id: b.ownerId,
-          crop_id: b.cropId,
+          owner_type: ownerType,
+          owner_id: ownerId,
+          crop_id: cropId,
           variety: b.variety || null,
-          quantity_quintals: Number(b.quantityQuintals),
+          quantity_quintals: quantityQuintals,
           grade: b.grade || "A",
-          location: b.location,
-          district: b.district,
-          harvest_date: b.harvestDate || null,
-          available_from: b.availableFrom || null,
-          expected_price: Number(b.expectedPrice) || 0,
-          min_acceptable_price: b.minAcceptablePrice ? Number(b.minAcceptablePrice) : null,
-          storage_available: Boolean(b.storageAvailable),
+          location: location,
+          district: district,
+          harvest_date: b.harvestDate || b.harvest_date || null,
+          available_from: b.availableFrom || b.available_from || null,
+          expected_price: Number(b.expectedPrice || b.expected_price || 0),
+          min_acceptable_price: b.minAcceptablePrice !== undefined ? Number(b.minAcceptablePrice) : (b.min_acceptable_price !== undefined ? Number(b.min_acceptable_price) : null),
+          storage_available: Boolean(b.storageAvailable !== undefined ? b.storageAvailable : b.storage_available),
           status: "Open for offers",
           created_at: new Date().toISOString()
         })
@@ -130,7 +152,10 @@ router.post("/", async (req, res) => {
         .single();
 
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(201).json(data);
+      return res.status(201).json({
+        ...data,
+        crop_name: catalogItem?.name || "Produce"
+      });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -139,11 +164,77 @@ router.post("/", async (req, res) => {
   const db = getDb();
   db.prepare(`INSERT INTO lots (id, owner_type, owner_id, crop_id, variety, quantity_quintals, grade, location, district, harvest_date, available_from, expected_price, min_acceptable_price, storage_available, status)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    lotId, b.ownerType, b.ownerId, b.cropId, b.variety || null, b.quantityQuintals, b.grade || null,
-    b.location, b.district, b.harvestDate || null, b.availableFrom || null, b.expectedPrice || null,
-    b.minAcceptablePrice || null, b.storageAvailable ? 1 : 0, "Open for offers"
+    lotId, ownerType, ownerId, cropId, b.variety || null, quantityQuintals, b.grade || "A",
+    location, district, b.harvestDate || b.harvest_date || null, b.availableFrom || b.available_from || null,
+    Number(b.expectedPrice || b.expected_price || 0),
+    b.minAcceptablePrice ? Number(b.minAcceptablePrice) : null,
+    b.storageAvailable ? 1 : 0, "Open for offers"
   );
-  res.status(201).json(db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId));
+  const row = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(lotId);
+  res.status(201).json({ ...row, crop_name: catalogItem?.name || "Produce" });
+});
+
+router.put("/:id", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  const b = req.body || {};
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    const { data: existing, error: findErr } = await supabase.from("lots").select("*").eq("id", req.params.id).maybeSingle();
+    if (findErr || !existing) return res.status(404).json({ error: "Lot not found" });
+
+    const updates = {
+      updated_at: new Date().toISOString()
+    };
+    if (b.cropId || b.crop_id) updates.crop_id = b.cropId || b.crop_id;
+    if (b.variety !== undefined) updates.variety = b.variety;
+    if (b.quantityQuintals !== undefined || b.quantity_quintals !== undefined) {
+      updates.quantity_quintals = Number(b.quantityQuintals !== undefined ? b.quantityQuintals : b.quantity_quintals);
+    }
+    if (b.grade !== undefined) updates.grade = b.grade;
+    if (b.location !== undefined) updates.location = b.location;
+    if (b.district !== undefined) updates.district = b.district;
+    if (b.expectedPrice !== undefined || b.expected_price !== undefined) {
+      updates.expected_price = Number(b.expectedPrice !== undefined ? b.expectedPrice : b.expected_price);
+    }
+    if (b.minAcceptablePrice !== undefined || b.min_acceptable_price !== undefined) {
+      updates.min_acceptable_price = Number(b.minAcceptablePrice !== undefined ? b.minAcceptablePrice : b.min_acceptable_price);
+    }
+    if (b.status !== undefined) updates.status = b.status;
+
+    const { data, error } = await supabase
+      .from("lots")
+      .update(updates)
+      .eq("id", req.params.id)
+      .select("*, crops(name)")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({
+      ...data,
+      crop_name: data.crops?.name || AUTHORITATIVE_CROPS_CATALOG.find(c => c.crop_id === data.crop_id)?.name || "Produce"
+    });
+  }
+
+  const db = getDb();
+  const existing = db.prepare(`SELECT * FROM lots WHERE id = ?`).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Lot not found" });
+
+  const cropId = b.cropId || b.crop_id || existing.crop_id;
+  const variety = b.variety !== undefined ? b.variety : existing.variety;
+  const qty = b.quantityQuintals !== undefined ? Number(b.quantityQuintals) : existing.quantity_quintals;
+  const grade = b.grade !== undefined ? b.grade : existing.grade;
+  const loc = b.location !== undefined ? b.location : existing.location;
+  const dist = b.district !== undefined ? b.district : existing.district;
+  const price = b.expectedPrice !== undefined ? Number(b.expectedPrice) : existing.expected_price;
+
+  db.prepare(`UPDATE lots SET crop_id = ?, variety = ?, quantity_quintals = ?, grade = ?, location = ?, district = ?, expected_price = ? WHERE id = ?`)
+    .run(cropId, variety, qty, grade, loc, dist, price, req.params.id);
+
+  const updated = db.prepare(`SELECT l.*, c.name as crop_name FROM lots l JOIN crops c ON c.id = l.crop_id WHERE l.id = ?`).get(req.params.id);
+  res.json(updated);
 });
 
 router.patch("/:id/status", async (req, res) => {
