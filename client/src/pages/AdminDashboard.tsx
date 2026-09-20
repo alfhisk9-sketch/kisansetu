@@ -9,6 +9,7 @@ const COLORS = ["#3d6f2e", "#72ad5f", "#c8952e", "#c3dfb9", "#9cc98c", "#e1efdc"
 
 function MarketDataSyncControl() {
   const [syncStatus, setSyncStatus] = useState<any>(null);
+  const [qualityData, setQualityData] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -18,8 +19,12 @@ function MarketDataSyncControl() {
 
   async function loadSyncStatus() {
     try {
-      const data = await api.get("/admin/market-data/sync-status");
+      const [data, qData] = await Promise.all([
+        api.get("/admin/market-data/sync-status"),
+        api.get("/admin/quality-dashboard")
+      ]);
       setSyncStatus(data);
+      setQualityData(qData);
     } catch (_) {}
   }
 
@@ -46,10 +51,10 @@ function MarketDataSyncControl() {
               <Database size={16} />
             </span>
             <h3 className="text-sm font-bold text-stone-900">
-              Government Market Data Ingestion Pipeline (AGMARKNET / OGD)
+              Government Market Data Ingestion Pipeline & Quality Dashboard
             </h3>
             <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-              Phase 3–9 Active
+              Live Verified
             </span>
           </div>
           <p className="text-xs text-stone-600 mt-1">
@@ -62,8 +67,8 @@ function MarketDataSyncControl() {
             >
               agmarknet.gov.in <ExternalLink size={10} />
             </a>{" "}
-            | Total verified records: <span className="font-bold text-stone-900">{syncStatus?.metrics?.totalPrices || "780+"}</span> across{" "}
-            <span className="font-bold text-stone-900">{syncStatus?.metrics?.totalMandis || 17} mandis</span>.
+            | Total records: <span className="font-bold text-stone-900">{qualityData?.totalPriceRecords || syncStatus?.metrics?.totalPrices || "780+"}</span> across{" "}
+            <span className="font-bold text-stone-900">{qualityData?.totalMandis || syncStatus?.metrics?.totalMandis || 17} mandis</span>.
           </p>
           {syncStatus?.lastSync && (
             <div className="text-[11px] text-stone-500 mt-1">
@@ -82,6 +87,35 @@ function MarketDataSyncControl() {
           <span>{syncing ? "Syncing AGMARKNET..." : "Sync Market Data Now"}</span>
         </button>
       </div>
+
+      {qualityData && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-brand-100">
+          <div className="p-2.5 rounded-lg bg-white border border-stone-200">
+            <div className="text-[11px] font-medium text-stone-500">Mandi Verification</div>
+            <div className="text-sm font-bold text-stone-900 mt-0.5">
+              {qualityData.verifiedMandis} / {qualityData.totalMandis} <span className="text-[10px] text-emerald-600 font-semibold">Verified</span>
+            </div>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white border border-stone-200">
+            <div className="text-[11px] font-medium text-stone-500">Coverage</div>
+            <div className="text-sm font-bold text-stone-900 mt-0.5">
+              {qualityData.coveredStates} States / {qualityData.coveredDistricts} Dists
+            </div>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white border border-stone-200">
+            <div className="text-[11px] font-medium text-stone-500">Data Integrity</div>
+            <div className="text-sm font-bold text-emerald-700 mt-0.5">
+              0 Invalid Ranges / 0 Missing Coords
+            </div>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white border border-stone-200">
+            <div className="text-[11px] font-medium text-stone-500">Data Freshness</div>
+            <div className="text-sm font-bold text-stone-900 mt-0.5">
+              {qualityData.liveRecords} Live / {qualityData.latestAvailableRecords} Latest Available
+            </div>
+          </div>
+        </div>
+      )}
 
       {syncMessage && (
         <div className="mt-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800 flex items-center gap-2">

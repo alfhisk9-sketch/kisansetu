@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 import { calcMarketCharges, calcNetRealization, calcTransportCost } from "../lib/algorithms.js";
 import { requireRole } from "../lib/authMiddleware.js";
 import { syncMarketData, getLatestSyncStatus } from "../services/marketDataService.js";
+import { AUTHORITATIVE_CROPS_CATALOG } from "../services/cropMasterService.js";
 
 const router = Router();
 
@@ -228,6 +229,140 @@ router.get("/forecast-runs", async (req, res) => {
   }
   const db = getDb();
   res.json(db.prepare("SELECT * FROM forecast_runs ORDER BY created_at DESC LIMIT 20").all());
+});
+
+router.get("/markets", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+    try {
+      const { data, error } = await supabase.from("markets").select("*").order("name");
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+  const db = getDb();
+  res.json(db.prepare("SELECT * FROM markets ORDER BY name").all());
+});
+
+router.get("/crops", async (req, res) => {
+  res.json(AUTHORITATIVE_CROPS_CATALOG);
+});
+
+router.get("/quality-dashboard", async (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production" && process.env.ALLOW_OFFLINE_DEV !== "true";
+
+  if (isProduction) {
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Production Database Unavailable" });
+
+    try {
+      const [
+        { data: allMarkets, error: marketsErr },
+        { data: allPrices, error: pricesErr },
+        { data: syncLogs, error: syncErr }
+      ] = await Promise.all([
+        supabase.from("markets").select("*"),
+        supabase.from("market_prices").select("id, min_price, modal_price, max_price, date, data_status, source, commodity"),
+        supabase.from("market_data_sync_logs").select("*").order("synced_at", { ascending: false }).limit(5)
+      ]);
+
+      if (marketsErr) console.warn("Admin quality dashboard markets query warning:", marketsErr.message);
+      if (pricesErr) console.warn("Admin quality dashboard prices query warning:", pricesErr.message);
+
+      const markets = allMarkets || [];
+      const prices = allPrices || [];
+
+      const verifiedMandis = markets.filter(m => (m.verification_status === "VERIFIED" || m.status === "active") && m.lat != null).length;
+      const unverifiedMandis = markets.length - verifiedMandis;
+      const missingCoordinates = markets.filter(m => m.lat == null || m.lng == null).length;
+
+      let invalidPriceRanges = 0;
+      let nonPositivePrices = 0;
+      let liveRecords = 0;
+      let latestAvailableRecords = 0;
+      let historicalRecords = 0;
+      let staleRecords = 0;
+      const today = new Date();
+
+      for (const p of prices) {
+        const min = Number(p.min_price);
+        const modal = Number(p.modal_price);
+        const max = Number(p.max_price);
+
+        if (min <= 0 || modal <= 0 || max <= 0) nonPositivePrices++;
+        if (min > modal || modal > max) invalidPriceRanges++;
+
+        if (p.data_status === "LIVE") liveRecords++;
+        else if (p.data_status === "HISTORICAL") historicalRecords++;
+        else latestAvailableRecords++;
+
+        if (p.date) {
+          const diffDays = Math.round((today - new Date(p.date)) / (1000 * 3600 * 24));
+          if (diffDays > 14) staleRecords++;
+        }
+      }
+
+      const coveredStates = Array.from(new Set(markets.map(m => m.state).filter(Boolean)));
+      const coveredDistricts = Array.from(new Set(markets.map(m => m.district).filter(Boolean)));
+
+      return res.json({
+        totalMandis: markets.length,
+        verifiedMandis,
+        unverifiedMandis,
+        missingCoordinates,
+        coveredStates: coveredStates.length,
+        coveredDistricts: coveredDistricts.length,
+        statesList: coveredStates,
+        districtsList: coveredDistricts,
+        totalPriceRecords: prices.length,
+        invalidPriceRanges,
+        nonPositivePrices,
+        staleRecords,
+        liveRecords,
+        latestAvailableRecords,
+        historicalRecords,
+        lastSync: syncLogs?.[0] || null,
+        recentSyncLogs: syncLogs || []
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // SQLite fallback
+  const db = getDb();
+  const markets = db.prepare("SELECT * FROM markets").all();
+  const prices = db.prepare("SELECT * FROM market_prices").all();
+  const syncLogs = db.prepare("SELECT * FROM market_data_sync_logs ORDER BY synced_at DESC LIMIT 5").all();
+
+  const verifiedMandis = markets.filter(m => m.lat != null).length;
+  const missingCoordinates = markets.filter(m => m.lat == null || m.lng == null).length;
+  let invalidPriceRanges = 0;
+  for (const p of prices) {
+    if (p.min_price > p.modal_price || p.modal_price > p.max_price) invalidPriceRanges++;
+  }
+
+  res.json({
+    totalMandis: markets.length,
+    verifiedMandis,
+    unverifiedMandis: markets.length - verifiedMandis,
+    missingCoordinates,
+    coveredStates: Array.from(new Set(markets.map(m => m.state))).length,
+    coveredDistricts: Array.from(new Set(markets.map(m => m.district))).length,
+    totalPriceRecords: prices.length,
+    invalidPriceRanges,
+    nonPositivePrices: 0,
+    staleRecords: 0,
+    liveRecords: prices.filter(p => p.data_status === "LIVE").length,
+    latestAvailableRecords: prices.filter(p => p.data_status !== "LIVE").length,
+    historicalRecords: 0,
+    lastSync: syncLogs[0] || null,
+    recentSyncLogs: syncLogs
+  });
 });
 
 export default router;

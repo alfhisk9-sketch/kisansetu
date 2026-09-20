@@ -37,7 +37,49 @@ export default function Assistant() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [listening, setListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  function startListening() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice speech recognition is not supported in this browser. Please type your question.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = locale === "hi" ? "hi-IN" : locale === "te" ? "te-IN" : locale === "mr" ? "mr-IN" : "en-IN";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript) {
+          setInput(transcript);
+          send(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error:", event.error);
+        setListening(false);
+      };
+
+      recognition.onend = () => {
+        setListening(false);
+      };
+
+      recognition.start();
+    } catch (err: any) {
+      console.warn("Speech recognition initialization failed:", err.message);
+      setListening(false);
+    }
+  }
 
   const SUGGESTED_PROMPTS = [
     "Where should I sell my crop for the highest net profit?",
@@ -255,9 +297,14 @@ export default function Assistant() {
             />
             <button 
               type="button" 
-              onClick={() => send("Where should I sell my produce today?")}
-              className="p-2.5 rounded-lg border border-stone-200 bg-white text-stone-600 hover:text-stone-900 hover:bg-stone-50 transition-colors"
-              title="Voice simulation"
+              onClick={startListening}
+              disabled={loading}
+              className={`p-2.5 rounded-lg border transition-all ${
+                listening 
+                  ? "bg-red-50 border-red-300 text-red-600 animate-pulse" 
+                  : "border-stone-200 bg-white text-stone-600 hover:text-stone-900 hover:bg-stone-50"
+              }`}
+              title={listening ? "Listening... speak now" : "Click to speak with AI Saathi (Speech-to-Text)"}
             >
               <Mic size={18} />
             </button>

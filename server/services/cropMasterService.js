@@ -255,7 +255,131 @@ export const AUTHORITATIVE_CROPS_CATALOG = [
       moisture_max_pct: 8.0,
       grade_standards: "Bold / Java Pods"
     },
-    active: true
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR / Directorate of Economics and Statistics"
+  },
+  {
+    crop_id: "crop-sugarcane",
+    name: "Sugarcane",
+    scientific_name: "Saccharum officinarum",
+    local_names: {
+      hindi: "गन्ना (Ganna)",
+      marathi: "ऊस (Oos)",
+      telugu: "చెరకు (Cheraku)"
+    },
+    category: "Cash Crop",
+    common_unit: "quintal",
+    season: "Annual / Adsali",
+    harvest_period: "November - April",
+    storage_notes: "Highly perishable post-harvest; must be processed within 24-48 hours to prevent sucrose inversion and post-harvest staling.",
+    quality_parameters: {
+      brix_pct_min: 18.0,
+      sucrose_pct_min: 11.5,
+      fiber_pct_max: 13.5,
+      grade_standards: "Mill Cane Recovery Standard"
+    },
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR - Sugarcane Breeding Institute (SBI)"
+  },
+  {
+    crop_id: "crop-bengal-gram",
+    name: "Bengal Gram (Chickpea)",
+    scientific_name: "Cicer arietinum",
+    local_names: {
+      hindi: "चना (Chana)",
+      marathi: "हरभरा (Harbhara)",
+      telugu: "శనగలు (Sanagalu)"
+    },
+    category: "Pulses",
+    common_unit: "quintal",
+    season: "Rabi",
+    harvest_period: "February - April",
+    storage_notes: "Dry to moisture below 9.5% before storage. Store in fumigated hermetic bags or godowns to prevent pulse beetle (Callosobruchus maculatus) damage.",
+    quality_parameters: {
+      variety_dominant: "Desi / Kabuli (JG 11 / KAK 2)",
+      moisture_max_pct: 9.5,
+      damaged_grains_max_pct: 2.0,
+      foreign_matter_max_pct: 1.0,
+      grade_standards: "FAQ / Agmark Standard"
+    },
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR - Indian Institute of Pulses Research (IIPR)"
+  },
+  {
+    crop_id: "crop-red-gram",
+    name: "Red Gram (Pigeon Pea)",
+    scientific_name: "Cajanus cajan",
+    local_names: {
+      hindi: "अरहर / तुअर (Arhar / Tur)",
+      marathi: "तूर (Tur)",
+      telugu: "కందులు (Kandulu)"
+    },
+    category: "Pulses",
+    common_unit: "quintal",
+    season: "Kharif",
+    harvest_period: "December - February",
+    storage_notes: "Maintain moisture below 10%. Aerate periodically; avoid damp storage floors.",
+    quality_parameters: {
+      variety_dominant: "Asha (ICPL 87119) / Maruti",
+      moisture_max_pct: 10.0,
+      weeviled_grains_max_pct: 1.5,
+      foreign_matter_max_pct: 1.0,
+      grade_standards: "FAQ Grade 1 / Agmark"
+    },
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR - Indian Institute of Pulses Research (IIPR)"
+  },
+  {
+    crop_id: "crop-green-gram",
+    name: "Green Gram (Moong)",
+    scientific_name: "Vigna radiata",
+    local_names: {
+      hindi: "मूंग (Moong)",
+      marathi: "मूग (Moog)",
+      telugu: "పెసలు (Pesalu)"
+    },
+    category: "Pulses",
+    common_unit: "quintal",
+    season: "Kharif & Summer",
+    harvest_period: "September - October / May - June",
+    storage_notes: "Store at moisture level below 9%. High susceptibility to bruchid infestation; use hermetic grain storage bags.",
+    quality_parameters: {
+      variety_dominant: "IPM 02-03 / Samrat",
+      moisture_max_pct: 9.0,
+      foreign_matter_max_pct: 1.0,
+      grade_standards: "FAQ Agmark Standard"
+    },
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR - Indian Institute of Pulses Research (IIPR)"
+  },
+  {
+    crop_id: "crop-black-gram",
+    name: "Black Gram (Urad)",
+    scientific_name: "Vigna mungo",
+    local_names: {
+      hindi: "उड़द (Urad)",
+      marathi: "उडीद (Udid)",
+      telugu: "మినుములు (Minumulu)"
+    },
+    category: "Pulses",
+    common_unit: "quintal",
+    season: "Kharif & Rabi",
+    harvest_period: "October - November / February - March",
+    storage_notes: "Dry thoroughly to under 9.5% moisture. Store in dry, pest-sealed warehousing.",
+    quality_parameters: {
+      variety_dominant: "LBG 752 / PU 31",
+      moisture_max_pct: 9.5,
+      foreign_matter_max_pct: 1.0,
+      grade_standards: "FAQ Agmark Standard"
+    },
+    active: true,
+    verification_status: "VERIFIED",
+    source: "ICAR - Indian Institute of Pulses Research (IIPR)"
   }
 ];
 
